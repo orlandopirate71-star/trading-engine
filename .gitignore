@@ -1,0 +1,42 @@
+# Credentials - NEVER commit
+feed_config.json
+connections.py
+*.env
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+
+# Dashboard build
+dashboard/dist/
+dashboard/node_modules/
+
+# Screenshots
+screenshots/
+
+# Redis/OANDA DB files
+*.rdb
+*.aof
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local

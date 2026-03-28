@@ -1,0 +1,36 @@
+{
+  "feeds": [
+    {
+      "type": "binance",
+      "enabled": false,
+      "symbols": ["BTCUSDT", "ETHUSDT"]
+    },
+    {
+      "type": "mt4",
+      "enabled": false,
+      "port": 5555,
+      "symbols": ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"]
+    },
+    {
+      "type": "oanda",
+      "enabled": true,
+      "account_id": "YOUR_OANDA_ACCOUNT_ID",
+      "api_token": "YOUR_OANDA_API_TOKEN",
+      "practice": true,
+      "symbols": [
+        "EUR_USD",
+        "GBP_USD",
+        "USD_JPY",
+        "USD_CHF",
+        "AUD_USD",
+        "USD_CAD",
+        "NZD_USD",
+        "EUR_GBP",
+        "EUR_JPY",
+        "GBP_JPY",
+        "XAU_USD",
+        "XAG_USD"
+      ]
+    }
+  ]
+}

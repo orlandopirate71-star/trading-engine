@@ -1,0 +1,35 @@
+import redis
+
+redis_client = redis.Redis(
+    host="localhost",
+    port=6379,
+    decode_responses=True
+)
+import psycopg2
+
+def get_db_connection():
+    return psycopg2.connect(
+        host="localhost",
+        database="trading",
+        user="trader",
+        password="YOUR_POSTGRES_PASSWORD"
+    )
+import requests
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+
+def query_ollama(prompt):
+    response = requests.post(OLLAMA_URL, json={
+        "model": "llama3",
+        "prompt": prompt,
+        "stream": False
+    })
+
+    data = response.json()
+
+    if "response" in data:
+        return data["response"]
+    elif "error" in data:
+        raise Exception(f"Ollama error: {data['error']}")
+    else:
+        raise Exception(f"Unexpected response: {data}")
