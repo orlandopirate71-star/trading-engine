@@ -10,73 +10,52 @@ import {
   AlertTriangle,
   Zap,
   Shield,
-  Eye
+  Eye,
+  Trash2
 } from 'lucide-react'
-
-const EventIcon = ({ type }) => {
-  switch (type) {
-    case 'signal_validation':
-      return <Brain size={16} className="text-purple-400" />
-    case 'position_monitor':
-      return <Eye size={16} className="text-blue-400" />
-    case 'action':
-      return <Zap size={16} className="text-yellow-400" />
-    default:
-      return <Activity size={16} className="text-gray-400" />
-  }
-}
 
 const ValidationResult = ({ event }) => {
   const isApproved = event.data?.approved || event.approved
   return (
-    <div className={`p-4 rounded-lg border ${
+    <div className={`p-2 rounded border text-xs ${
       isApproved ? 'bg-green-900/20 border-green-700' : 'bg-red-900/20 border-red-700'
     }`}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Brain size={16} className="text-purple-400" />
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-1">
+          <Brain size={12} className="text-purple-400" />
           <span className="font-medium">
             {event.data?.symbol || event.symbol} {event.data?.direction || event.direction}
           </span>
         </div>
         {isApproved ? (
-          <span className="flex items-center gap-1 text-green-400 text-sm">
-            <CheckCircle size={14} />
+          <span className="flex items-center gap-0.5 text-green-400">
+            <CheckCircle size={10} />
             APPROVED
           </span>
         ) : (
-          <span className="flex items-center gap-1 text-red-400 text-sm">
-            <XCircle size={14} />
+          <span className="flex items-center gap-0.5 text-red-400">
+            <XCircle size={10} />
             REJECTED
           </span>
         )}
       </div>
-      <div className="grid grid-cols-3 gap-4 text-sm mb-3">
+      <div className="flex items-center gap-4 text-xs mb-1">
         <div>
-          <div className="text-gray-400">Confidence</div>
-          <div className="font-mono">{((event.data?.confidence || 0) * 100).toFixed(0)}%</div>
+          <span className="text-gray-500">Conf: </span>
+          <span className="font-mono">{((event.data?.confidence || 0) * 100).toFixed(0)}%</span>
         </div>
         <div>
-          <div className="text-gray-400">Risk Score</div>
-          <div className="font-mono">{((event.data?.risk_score || 0) * 100).toFixed(0)}%</div>
+          <span className="text-gray-500">Risk: </span>
+          <span className="font-mono">{((event.data?.risk_score || 0) * 100).toFixed(0)}%</span>
         </div>
         <div>
-          <div className="text-gray-400">Latency</div>
-          <div className="font-mono">{event.data?.latency_ms || event.latency_ms || 0}ms</div>
+          <span className="text-gray-500">Latency: </span>
+          <span className="font-mono">{event.data?.latency_ms || event.latency_ms || 0}ms</span>
         </div>
       </div>
-      <div className="text-xs text-gray-400 mb-2">
-        Reasoning: {event.data?.reasoning || event.reasoning || 'N/A'}
+      <div className="text-gray-500 text-xs line-clamp-1">
+        {event.data?.reasoning || event.reasoning || 'N/A'}
       </div>
-      {event.data?.recommendations?.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
-          {event.data.recommendations.map((rec, i) => (
-            <span key={i} className="text-xs px-2 py-0.5 bg-gray-800 rounded text-gray-300">
-              {rec}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -94,58 +73,47 @@ const MonitorResult = ({ event }) => {
   }
 
   return (
-    <div className={`p-4 rounded-lg border border-gray-700 bg-gray-900/50`}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Eye size={16} className="text-blue-400" />
+    <div className={`p-2 rounded border border-gray-700 bg-gray-900/50 text-xs`}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-1">
+          <Eye size={12} className="text-blue-400" />
           <span className="font-medium">
             {event.data?.symbol || event.symbol}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <span className={`font-bold ${actionColors[action] || 'text-gray-400'}`}>
             {action}
           </span>
           {urgency === 'high' && (
-            <AlertTriangle size={14} className="text-red-400" />
+            <AlertTriangle size={10} className="text-red-400" />
           )}
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4 text-sm mb-3">
+      <div className="flex items-center gap-4 text-xs mb-1">
         <div>
-          <div className="text-gray-400">Confidence</div>
-          <div className="font-mono">{((event.data?.confidence || 0) * 100).toFixed(0)}%</div>
+          <span className="text-gray-500">Conf: </span>
+          <span className="font-mono">{((event.data?.confidence || 0) * 100).toFixed(0)}%</span>
         </div>
         <div>
-          <div className="text-gray-400">Urgency</div>
-          <div className={`font-mono ${
+          <span className="text-gray-500">Urgency: </span>
+          <span className={`font-mono ${
             urgency === 'high' ? 'text-red-400' :
             urgency === 'medium' ? 'text-yellow-400' : 'text-green-400'
           }`}>
             {urgency?.toUpperCase() || 'LOW'}
-          </div>
+          </span>
         </div>
         {event.data?.new_stop_loss && (
           <div>
-            <div className="text-gray-400">New SL</div>
-            <div className="font-mono text-yellow-400">
-              {event.data.new_stop_loss}
-            </div>
+            <span className="text-gray-500">New SL: </span>
+            <span className="font-mono text-yellow-400">{event.data.new_stop_loss}</span>
           </div>
         )}
       </div>
-      <div className="text-xs text-gray-400">
+      <div className="text-gray-500 text-xs line-clamp-1">
         {event.data?.reasoning || event.reasoning || 'N/A'}
       </div>
-      {event.data?.warnings?.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
-          {event.data.warnings.map((warn, i) => (
-            <span key={i} className="text-xs px-2 py-0.5 bg-red-900/50 rounded text-red-300">
-              {warn}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -166,6 +134,16 @@ export default function AIActivity() {
     setLoading(false)
   }
 
+  const clearActivity = async () => {
+    if (!confirm('Clear all AI activity logs?')) return
+    try {
+      await fetch('/api/ai-activity', { method: 'DELETE' })
+      setEvents([])
+    } catch (err) {
+      console.error('Failed to clear AI activity:', err)
+    }
+  }
+
   useEffect(() => {
     fetchActivity()
     const interval = setInterval(fetchActivity, 5000)
@@ -181,54 +159,60 @@ export default function AIActivity() {
     return true
   })
 
+  const approvedCount = events.filter(e => e.data?.approved || e.approved === true).length
+  const rejectedCount = events.filter(e => e.data?.approved === false || e.approved === false).length
+  const avgConf = events.length > 0
+    ? ((events.reduce((sum, e) => sum + (e.data?.confidence || e.confidence || 0), 0) / events.length) * 100).toFixed(0)
+    : 0
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Brain size={28} className="text-purple-400" />
-          <h1 className="text-2xl font-bold">AI Activity</h1>
+        <div className="flex items-center gap-2">
+          <Brain size={20} className="text-purple-400" />
+          <h1 className="text-lg font-bold">AI Activity</h1>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-400">
-          <Activity size={16} />
-          Live updates every 5s
+        <div className="flex items-center gap-1 text-xs text-gray-400">
+          <Activity size={12} />
+          Live
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="text-gray-400 text-sm">Total Validations</div>
-          <div className="text-2xl font-bold">{events.length}</div>
+      <div className="grid grid-cols-4 gap-2">
+        <div className="bg-gray-800 rounded-lg p-2 border border-gray-700 text-xs">
+          <div className="text-gray-400">Total</div>
+          <div className="text-lg font-bold">{events.length}</div>
         </div>
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="text-gray-400 text-sm">Approved</div>
-          <div className="text-2xl font-bold text-green-400">
-            {events.filter(e => e.data?.approved || e.approved === true).length}
-          </div>
+        <div className="bg-gray-800 rounded-lg p-2 border border-gray-700 text-xs">
+          <div className="text-gray-400">Approved</div>
+          <div className="text-lg font-bold text-green-400">{approvedCount}</div>
         </div>
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="text-gray-400 text-sm">Rejected</div>
-          <div className="text-2xl font-bold text-red-400">
-            {events.filter(e => e.data?.approved === false || e.approved === false).length}
-          </div>
+        <div className="bg-gray-800 rounded-lg p-2 border border-gray-700 text-xs">
+          <div className="text-gray-400">Rejected</div>
+          <div className="text-lg font-bold text-red-400">{rejectedCount}</div>
         </div>
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="text-gray-400 text-sm">Avg Confidence</div>
-          <div className="text-2xl font-bold">
-            {events.length > 0
-              ? ((events.reduce((sum, e) => sum + (e.data?.confidence || e.confidence || 0), 0) / events.length) * 100).toFixed(0)
-              : 0}%
-          </div>
+        <div className="bg-gray-800 rounded-lg p-2 border border-gray-700 text-xs">
+          <div className="text-gray-400">Avg Conf</div>
+          <div className="text-lg font-bold">{avgConf}%</div>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2">
+      <div className="flex gap-1 items-center">
+        <button
+          onClick={clearActivity}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-red-900/50 text-red-400 hover:bg-red-900 border border-red-700"
+        >
+          <Trash2 size={10} />
+          Clear
+        </button>
+        <div className="flex-1"/>
         {['all', 'validation', 'monitor', 'approved', 'rejected'].map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-2 py-1 rounded text-xs ${
               filter === f
                 ? 'bg-purple-600 text-white'
                 : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
@@ -241,15 +225,15 @@ export default function AIActivity() {
 
       {/* Event Feed */}
       {loading ? (
-        <div className="text-center py-12 text-gray-500">
-          Loading AI activity...
+        <div className="text-center py-8 text-gray-500 text-xs">
+          Loading...
         </div>
       ) : filteredEvents.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          No AI activity yet
+        <div className="text-center py-8 text-gray-500 text-xs">
+          No AI activity
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {filteredEvents.map((event, i) => (
             <div key={i}>
               {event.type === 'signal_validation' || event.symbol ? (
@@ -257,8 +241,8 @@ export default function AIActivity() {
               ) : (
                 <MonitorResult event={event} />
               )}
-              <div className="text-xs text-gray-500 mt-1">
-                {new Date(event.timestamp || event.data?.timestamp || Date.now()).toLocaleString()}
+              <div className="text-xs text-gray-600 mt-0.5 ml-1">
+                {new Date(event.timestamp || event.data?.timestamp || Date.now()).toLocaleTimeString()}
               </div>
             </div>
           ))}

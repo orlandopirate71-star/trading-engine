@@ -367,6 +367,31 @@ def get_ai_activity(limit: int = Query(default=50, le=100)):
     return {"events": result}
 
 
+@app.delete("/api/ai-activity")
+def clear_ai_activity():
+    """Clear all AI activity logs."""
+    redis_client.delete(AI_ACTIVITY_KEY)
+    return {"status": "ok", "message": "AI activity log cleared"}
+
+
+@app.delete("/api/ai-activity/old")
+def clear_old_ai_activity(max_age_hours: int = Query(default=24, ge=1, le=720)):
+    """Clear AI activity logs older than specified hours."""
+    cutoff = datetime.utcnow().timestamp() - (max_age_hours * 3600)
+    events = redis_client.lrange(AI_ACTIVITY_KEY, 0, -1)
+    deleted = 0
+    for event in events:
+        try:
+            parsed = json.loads(event)
+            event_time = datetime.fromisoformat(parsed.get("timestamp", "2000-01-01"))
+            if event_time.timestamp() < cutoff:
+                redis_client.lrem(AI_ACTIVITY_KEY, 1, event)
+                deleted += 1
+        except:
+            pass
+    return {"status": "ok", "deleted": deleted, "older_than_hours": max_age_hours}
+
+
 @app.post("/api/candles/cleanup")
 def cleanup_old_candles(days: int = Query(default=14, ge=1, le=60)):
     """Delete candles older than specified days (default 14)."""

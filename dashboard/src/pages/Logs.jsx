@@ -51,52 +51,52 @@ const LogViewer = ({ logName, title }) => {
   }
 
   return (
-    <div className="bg-gray-800 rounded-xl border border-gray-700">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+    <div className="bg-gray-800 rounded-lg border border-gray-700">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
         <div className="flex items-center gap-2">
-          <FileText size={18} className="text-gray-400" />
-          <h3 className="font-medium">{title}</h3>
-          <span className="text-sm text-gray-500">({lines.length} lines)</span>
+          <FileText size={14} className="text-gray-400" />
+          <h3 className="font-medium text-xs">{title}</h3>
+          <span className="text-xs text-gray-500">({lines.length})</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {lastUpdate && (
             <span className="text-xs text-gray-500 flex items-center gap-1">
-              <Clock size={12} />
+              <Clock size={10} />
               {lastUpdate.toLocaleTimeString()}
             </span>
           )}
           <button
             onClick={fetchLog}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-gray-700 rounded transition-colors"
             title="Refresh"
           >
-            <RefreshCw size={16} className="text-gray-400" />
+            <RefreshCw size={12} className="text-gray-400" />
           </button>
           <button
             onClick={downloadLog}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-gray-700 rounded transition-colors"
             title="Download"
           >
-            <Download size={16} className="text-gray-400" />
+            <Download size={12} className="text-gray-400" />
           </button>
         </div>
       </div>
 
-      <div className="h-96 overflow-auto">
+      <div className="h-64 overflow-auto">
         {loading && lines.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="animate-pulse text-gray-500">Loading...</div>
           </div>
         ) : error ? (
-          <div className="flex items-center justify-center h-full text-red-400">
+          <div className="flex items-center justify-center h-full text-red-400 text-xs">
             {error}
           </div>
         ) : lines.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-gray-500">
+          <div className="flex items-center justify-center h-full text-gray-500 text-xs">
             No log data
           </div>
         ) : (
-          <pre className="p-4 text-xs font-mono text-gray-300 leading-relaxed whitespace-pre-wrap">
+          <pre className="p-2 text-xs font-mono text-gray-300 leading-relaxed whitespace-pre-wrap">
             {lines.map((line, i) => (
               <div
                 key={i}
@@ -123,42 +123,42 @@ const Logs = () => {
   const [activeTab, setActiveTab] = useState('api.log')
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">System Logs</h1>
+        <h1 className="text-lg font-bold">System Logs</h1>
       </div>
 
       {/* Log Selection Tabs */}
-      <div className="flex gap-2 border-b border-gray-700 pb-4">
+      <div className="flex gap-1 text-xs">
         <button
           onClick={() => setActiveTab('api.log')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
             activeTab === 'api.log'
               ? 'bg-blue-600 text-white'
               : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
           }`}
         >
-          API Log
+          API
         </button>
         <button
           onClick={() => setActiveTab('feeds.log')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
             activeTab === 'feeds.log'
               ? 'bg-blue-600 text-white'
               : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
           }`}
         >
-          Feeds Log
+          Feeds
         </button>
         <button
           onClick={() => setActiveTab('dashboard.log')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
             activeTab === 'dashboard.log'
               ? 'bg-blue-600 text-white'
               : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
           }`}
         >
-          Dashboard Log
+          Dashboard
         </button>
       </div>
 
@@ -174,9 +174,9 @@ const Logs = () => {
       )}
 
       {/* Log Legend */}
-      <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-        <h3 className="text-sm font-medium mb-3">Color Legend</h3>
-        <div className="flex flex-wrap gap-4 text-xs">
+      <div className="bg-gray-800 rounded-lg p-3 border border-gray-700">
+        <h3 className="text-xs font-medium mb-2">Color Legend</h3>
+        <div className="flex flex-wrap gap-3 text-xs">
           <span className="text-red-400">ERROR</span>
           <span className="text-yellow-400">WARNING</span>
           <span className="text-blue-400">ENGINE</span>

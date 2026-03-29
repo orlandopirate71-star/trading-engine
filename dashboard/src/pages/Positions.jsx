@@ -300,29 +300,29 @@ export default function Positions() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Trade Manager</h1>
-          <p className="text-gray-400">Manage positions and buckets</p>
+          <h1 className="text-lg font-bold">Trade Manager</h1>
+          <p className="text-xs text-gray-400">Manage positions and buckets</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setShowBucketPanel(!showBucketPanel)}
-            className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
+            className={`px-3 py-1 rounded flex items-center gap-1 text-xs ${
               showBucketPanel ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600'
             }`}
           >
-            <Folder size={16} />
+            <Folder size={12} />
             Buckets
           </button>
           {positions.length > 0 && (
             <button
               onClick={() => closeAllTrades()}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg flex items-center gap-2"
+              className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded flex items-center gap-1 text-xs"
             >
-              <X size={16} />
+              <X size={12} />
               Close All
             </button>
           )}
@@ -331,47 +331,47 @@ export default function Positions() {
 
       {/* Buckets Panel */}
       {showBucketPanel && (
-        <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-          <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
-            <Folder size={20} className="text-blue-400" />
+        <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+          <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+            <Folder size={14} className="text-blue-400" />
             Trade Buckets
           </h3>
 
           {/* Create bucket */}
-          <div className="flex gap-2 mb-4">
+          <div className="flex gap-2 mb-3">
             <input
               type="text"
               value={newBucketName}
               onChange={(e) => setNewBucketName(e.target.value)}
               placeholder="New bucket name..."
-              className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded focus:outline-none focus:border-blue-500"
+              className="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-xs focus:outline-none focus:border-blue-500"
               onKeyPress={(e) => e.key === 'Enter' && createBucket()}
             />
             <button
               onClick={createBucket}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded flex items-center gap-2"
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded flex items-center gap-1 text-xs"
             >
-              <Plus size={16} />
+              <Plus size={12} />
               Create
             </button>
           </div>
 
           {/* Buckets list */}
           {buckets.length === 0 ? (
-            <div className="text-gray-500 text-center py-4">
+            <div className="text-gray-500 text-center py-3 text-xs">
               No buckets yet. Create one to group trades.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               {buckets.map((bucket) => (
                 <div
                   key={bucket.name}
-                  className={`p-4 rounded-lg border ${
+                  className={`p-3 rounded-lg border ${
                     bucket.in_profit ? 'bg-green-900/30 border-green-700' : 'bg-gray-900/50 border-gray-700'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium">{bucket.name}</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium text-xs">{bucket.name}</span>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => closeBucketIfProfit(bucket.name)}
@@ -505,46 +505,46 @@ export default function Positions() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-4 gap-4">
-          <div className="bg-gray-800 rounded-lg p-4">
-            <div className="text-gray-400 text-sm">Total Positions</div>
-            <div className="text-2xl font-bold">{summary.total_positions}</div>
+        <div className="grid grid-cols-4 gap-2">
+          <div className="bg-gray-800 rounded-lg p-3">
+            <div className="text-gray-400 text-xs">Total Positions</div>
+            <div className="text-lg font-bold">{summary.total_positions}</div>
           </div>
-          <div className="bg-gray-800 rounded-lg p-4">
-            <div className="text-gray-400 text-sm">Unrealized P&L</div>
-            <div className={`text-2xl font-bold ${summary.total_unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+          <div className="bg-gray-800 rounded-lg p-3">
+            <div className="text-gray-400 text-xs">Unrealized P&L</div>
+            <div className={`text-lg font-bold ${summary.total_unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {formatPnl(summary.total_unrealized_pnl)}
             </div>
           </div>
-          <div className="bg-gray-800 rounded-lg p-4">
-            <div className="text-gray-400 text-sm">Winning</div>
-            <div className="text-2xl font-bold text-green-400">{summary.winning_positions}</div>
+          <div className="bg-gray-800 rounded-lg p-3">
+            <div className="text-gray-400 text-xs">Winning</div>
+            <div className="text-lg font-bold text-green-400">{summary.winning_positions}</div>
           </div>
-          <div className="bg-gray-800 rounded-lg p-4">
-            <div className="text-gray-400 text-sm">Losing</div>
-            <div className="text-2xl font-bold text-red-400">{summary.losing_positions}</div>
+          <div className="bg-gray-800 rounded-lg p-3">
+            <div className="text-gray-400 text-xs">Losing</div>
+            <div className="text-lg font-bold text-red-400">{summary.losing_positions}</div>
           </div>
         </div>
       )}
 
       {/* Positions Table */}
       {positions.length === 0 ? (
-        <div className="bg-gray-800 rounded-lg p-8 text-center">
-          <Activity className="mx-auto text-gray-600 mb-4" size={48} />
-          <p className="text-gray-400">No open positions</p>
+        <div className="bg-gray-800 rounded-lg p-6 text-center">
+          <Activity className="mx-auto text-gray-600 mb-2" size={32} />
+          <p className="text-gray-400 text-xs">No open positions</p>
         </div>
       ) : (
         <div className="bg-gray-800 rounded-lg overflow-hidden">
-          <table className="w-full">
+          <table className="w-full text-xs">
             <thead className="bg-gray-900">
               <tr>
-                <th className="px-4 py-3 text-left text-xs text-gray-400 uppercase">Symbol</th>
-                <th className="px-4 py-3 text-left text-xs text-gray-400 uppercase">Bucket</th>
-                <th className="px-4 py-3 text-left text-xs text-gray-400 uppercase">Direction</th>
-                <th className="px-4 py-3 text-right text-xs text-gray-400 uppercase">Entry</th>
-                <th className="px-4 py-3 text-right text-xs text-gray-400 uppercase">Current</th>
-                <th className="px-4 py-3 text-right text-xs text-gray-400 uppercase">P&L</th>
-                <th className="px-4 py-3 text-right text-xs text-gray-400 uppercase">Actions</th>
+                <th className="px-2 py-2 text-left text-gray-400 uppercase">Symbol</th>
+                <th className="px-2 py-2 text-left text-gray-400 uppercase">Bucket</th>
+                <th className="px-2 py-2 text-left text-gray-400 uppercase">Dir</th>
+                <th className="px-2 py-2 text-right text-gray-400 uppercase">Entry</th>
+                <th className="px-2 py-2 text-right text-gray-400 uppercase">Current</th>
+                <th className="px-2 py-2 text-right text-gray-400 uppercase">P&L</th>
+                <th className="px-2 py-2 text-right text-gray-400 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-700">
@@ -552,31 +552,31 @@ export default function Positions() {
                 const bucket = getTradeBucket(pos.trade_id)
                 return (
                   <tr key={pos.trade_id} className="hover:bg-gray-750">
-                    <td className="px-4 py-3">
+                    <td className="px-2 py-2">
                       <div className="font-medium">{pos.symbol}</div>
-                      <div className="text-xs text-gray-500">{pos.strategy_name} • {pos.broker?.toUpperCase()}</div>
+                      <div className="text-xs text-gray-500">{pos.strategy_name}</div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-2 py-2">
                       {bucket ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-900/50 text-blue-400 rounded text-xs">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-900/50 text-blue-400 rounded text-xs">
                           <Folder size={10} />
                           {bucket}
                         </span>
                       ) : (
                         <select
-                          className="bg-gray-700 text-xs rounded px-2 py-1"
+                          className="bg-gray-700 text-xs rounded px-1 py-0.5"
                           onChange={(e) => e.target.value && addToBucket(e.target.value, pos.trade_id)}
                           value=""
                         >
-                          <option value="">+ Add to bucket</option>
+                          <option value="">+ bucket</option>
                           {buckets.map((b) => (
                             <option key={b.name} value={b.name}>{b.name}</option>
                           ))}
                         </select>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
+                    <td className="px-2 py-2">
+                      <span className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-xs font-medium ${
                         pos.direction === 'long'
                           ? 'bg-green-900/50 text-green-400'
                           : 'bg-red-900/50 text-red-400'
@@ -585,7 +585,7 @@ export default function Positions() {
                         {pos.direction.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono">
+                    <td className="px-2 py-2 text-right font-mono">
                       {formatPrice(pos.entry_price, pos.symbol)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono">

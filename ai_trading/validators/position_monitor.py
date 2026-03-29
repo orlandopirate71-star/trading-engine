@@ -160,8 +160,26 @@ class PositionMonitor:
 
     def _monitor_loop(self):
         """Main monitoring loop."""
+        from datetime import datetime
+        def is_market_open():
+            now = datetime.utcnow()
+            utc_hour = now.hour
+            utc_day = now.weekday()
+            if utc_day == 6:
+                return False
+            if utc_day == 0 and utc_hour < 22:
+                return False
+            if utc_hour >= 22 or utc_hour < 6:
+                return True
+            return False
+
         while self._monitoring:
             try:
+                # Skip monitoring when market is closed
+                if not is_market_open():
+                    time.sleep(self.check_interval)
+                    continue
+
                 positions = self._get_positions_callback() if self._get_positions_callback else []
                 if positions:
                     self.check_now(positions)

@@ -18,6 +18,27 @@ from candle_store import init_candle_store, get_candle_store
 from oanda_broker import OandaBroker
 
 
+def is_market_open() -> bool:
+    """Check if forex market is currently open (weekdays 22:00-21:00 UTC)."""
+    now = datetime.utcnow()
+    utc_hour = now.hour
+    utc_day = now.weekday()  # 0=Monday, 6=Sunday
+
+    # Weekend - market closed
+    if utc_day == 6:  # Saturday
+        return False
+    if utc_day == 0 and utc_hour < 22:  # Sunday before 22:00
+        return False
+
+    # Active trading: 22:00-21:00 UTC (Sydney/Asian session through NY close)
+    # Low activity: 21:00-22:00 UTC ( NY close through London open gap)
+    if utc_hour >= 22 or utc_hour < 6:
+        return True
+
+    # Night lull / weekend crossover - consider closed
+    return False
+
+
 class TradingEngine:
     """
     Main trading engine that coordinates:
@@ -187,9 +208,9 @@ class TradingEngine:
         """Start the trading engine."""
         print("[ENGINE] Starting trading engine...")
 
-        # Clear stale price data from Redis
-        redis_client.delete("latest_prices")
-        print("[ENGINE] Cleared stale prices from Redis")
+        # NOTE: Don't clear latest_prices here - feeds are the source of truth
+        # Clearing it causes feed status to fail after engine restart
+        # redis_client.delete("latest_prices")
 
         # Set running FIRST before starting subscriber
         self.running = True
@@ -260,6 +281,10 @@ class TradingEngine:
 
     def _on_position_monitor_action(self, position: dict, result):
         """Handle AI position monitor decisions."""
+        # Skip logging when market is closed - no trading decisions needed
+        if not is_market_open():
+            return
+
         try:
             action = result.action.value
             print(f"[ENGINE] AI Monitor: {position.get('symbol')} -> {action} (confidence: {result.confidence:.2f})")
@@ -512,18 +537,22 @@ class TradingEngine:
     def _on_tick(self, symbol: str, price: float):
         """Handle incoming price tick."""
         timestamp = datetime.utcnow()
-        
+
         # Update last price
         old_price = self.last_prices.get(symbol)
         self.last_prices[symbol] = price
-        
+
         # Feed tick to candle aggregator (will trigger on_candle_close when candles complete)
         self.candle_aggregator.on_tick(symbol, price, timestamp=timestamp)
-        
+
         # Skip strategy processing if price hasn't changed
         if old_price == price:
             return
-        
+
+        # Check if market is open - skip signal generation when market is closed
+        if not is_market_open():
+            return
+
         # Check stop loss / take profit on open positions
         close_results = self.executor.check_stop_loss_take_profit(self.last_prices)
         for result in close_results:

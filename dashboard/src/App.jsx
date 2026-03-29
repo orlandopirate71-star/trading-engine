@@ -33,19 +33,19 @@ import SystemStatus from './components/SystemStatus'
 
 const NavLink = ({ to, icon: Icon, children }) => {
   const location = useLocation()
-  const isActive = location.pathname === to || 
+  const isActive = location.pathname === to ||
     (to !== '/' && location.pathname.startsWith(to))
-  
+
   return (
     <Link
       to={to}
-      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-        isActive 
-          ? 'bg-blue-600 text-white' 
+      className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-xs ${
+        isActive
+          ? 'bg-blue-600 text-white'
           : 'text-gray-400 hover:bg-gray-800 hover:text-white'
       }`}
     >
-      <Icon size={20} />
+      <Icon size={14} />
       <span>{children}</span>
     </Link>
   )
@@ -126,10 +126,17 @@ function App() {
 
   const checkMarketOpen = () => {
     const now = new Date()
+    const utcHour = now.getUTCHours()
     const utcDay = now.getUTCDay()
     // 0 = Sunday, 6 = Saturday - markets closed on weekends
-    const isWeekend = utcDay === 0 || utcDay === 6
-    setMarketOpen(!isWeekend)
+    if (utcDay === 0 || utcDay === 6) {
+      setMarketOpen(false)
+      return
+    }
+    // Forex is 24hr but active trading is 22:00-22:00 UTC
+    // Show as closed during low activity hours (6:00-22:00 UTC)
+    const isActiveHours = utcHour >= 22 || utcHour < 6
+    setMarketOpen(isActiveHours)
   }
 
   useEffect(() => {
@@ -224,36 +231,34 @@ function App() {
     <BrowserRouter>
       <div className="flex h-screen">
         {/* Sidebar */}
-        <aside className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
-          <div className="p-4 border-b border-gray-700">
+        <aside className="w-72 bg-gray-800 border-r border-gray-700 flex flex-col">
+          <div className="p-3 border-b border-gray-700">
             <div className="flex items-center justify-between">
-              <h1 className="text-xl font-bold flex items-center gap-2">
-                <Zap className="text-yellow-500" />
+              <h1 className="text-lg font-bold flex items-center gap-2">
+                <Zap className="text-yellow-500" size={16} />
                 Trading Station
               </h1>
               {candleCount > 0 && (
                 <span className="text-xs text-gray-400" title="AI training candles">
-                  {candleCount.toLocaleString()} candles
+                  {candleCount.toLocaleString()}
                 </span>
               )}
             </div>
           </div>
-          
+
           {/* Active Feed Symbols with Bias */}
-          <div className="p-4 border-b border-gray-700">
-            <div className="flex items-center justify-between mb-2">
+          <div className="p-3 border-b border-gray-700">
+            <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-2">
                 <div className="text-xs text-gray-500 uppercase">
                   Symbols ({Object.keys(prices).length})
                 </div>
                 {(() => {
-                  const hasCrypto = Object.keys(prices).some(s => s.includes('BTC') || s.includes('ETH'))
-                  const showOpen = marketOpen || hasCrypto
                   return (
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      showOpen ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'
+                      marketOpen ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'
                     }`}>
-                      {showOpen ? 'Markets Open' : 'Markets Closed'}
+                      {marketOpen ? 'Markets Open' : 'Markets Closed'}
                     </span>
                   )
                 })()}
@@ -337,29 +342,29 @@ function App() {
           </nav>
 
           {/* Engine Controls */}
-          <div className="p-4 border-t border-gray-700 space-y-3">
+          <div className="p-3 border-t border-gray-700 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-400">Engine</span>
+              <span className="text-xs text-gray-400">Engine</span>
               <button
                 onClick={toggleEngine}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium ${
-                  status?.running 
-                    ? 'bg-red-600 hover:bg-red-700' 
+                className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
+                  status?.running
+                    ? 'bg-red-600 hover:bg-red-700'
                     : 'bg-green-600 hover:bg-green-700'
                 }`}
               >
-                {status?.running ? <Square size={14} /> : <Play size={14} />}
+                {status?.running ? <Square size={10} /> : <Play size={10} />}
                 {status?.running ? 'Stop' : 'Start'}
               </button>
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-400">Auto Trade</span>
+              <span className="text-xs text-gray-400">Auto Trade</span>
               <button
                 onClick={toggleAutoTrade}
-                className={`px-3 py-1.5 rounded text-sm font-medium ${
-                  status?.auto_trade 
-                    ? 'bg-green-600' 
+                className={`px-2 py-1 rounded text-xs font-medium ${
+                  status?.auto_trade
+                    ? 'bg-green-600'
                     : 'bg-gray-600'
                 }`}
               >
@@ -368,10 +373,10 @@ function App() {
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-400">AI Approval</span>
+              <span className="text-xs text-gray-400">AI Approval</span>
               <button
                 onClick={toggleApproval}
-                className={`px-3 py-1.5 rounded text-sm font-medium ${
+                className={`px-2 py-1 rounded text-xs font-medium ${
                   status?.require_approval
                     ? 'bg-blue-600'
                     : 'bg-gray-600'
@@ -382,41 +387,41 @@ function App() {
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-400">Validator</span>
-              <span className="px-3 py-1.5 rounded text-sm font-medium bg-purple-600">
-                AI gpt-oss
+              <span className="text-xs text-gray-400">Validator</span>
+              <span className="px-2 py-1 rounded text-xs font-medium bg-purple-600">
+                AI
               </span>
             </div>
 
             {/* Clear History */}
-            <div className="relative pt-2 border-t border-gray-600 mt-2">
+            <div className="pt-2 border-t border-gray-600 mt-2">
               <button
                 onClick={() => setShowClearMenu(!showClearMenu)}
-                className="flex items-center gap-2 w-full px-3 py-1.5 rounded text-sm font-medium bg-gray-700 hover:bg-gray-600 text-gray-300"
+                className="flex items-center gap-1 w-full px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-gray-300"
               >
-                <Trash2 size={14} />
-                Clear History
+                <Trash2 size={10} />
+                Clear
               </button>
-              
+
               {showClearMenu && (
                 <div className="absolute bottom-full left-0 right-0 mb-1 bg-gray-700 rounded shadow-lg border border-gray-600 overflow-hidden">
                   <button
                     onClick={() => clearHistory('trades')}
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-600 text-gray-300"
+                    className="w-full px-2 py-1 text-left text-xs hover:bg-gray-600 text-gray-300"
                   >
                     Clear Trades
                   </button>
                   <button
                     onClick={() => clearHistory('signals')}
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-600 text-gray-300"
+                    className="w-full px-2 py-1 text-left text-xs hover:bg-gray-600 text-gray-300"
                   >
                     Clear Signals
                   </button>
                   <button
                     onClick={() => clearHistory('all')}
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-red-600 text-white font-medium"
+                    className="w-full px-2 py-1 text-left text-xs hover:bg-red-600 text-white"
                   >
-                    Clear All (Reset)
+                    Clear All
                   </button>
                 </div>
               )}

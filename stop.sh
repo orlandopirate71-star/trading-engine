@@ -31,5 +31,6 @@ fi
 pkill -f "python.*api.py" 2>/dev/null || true
 pkill -f "python.*multi_feed.py" 2>/dev/null || true
 pkill -f "node.*vite" 2>/dev/null || true
+pkill -f "chromium-browser.*localhost:3000" 2>/dev/null || true
 
 echo -e "${GREEN}All services stopped.${NC}"

@@ -21,13 +21,13 @@ import {
 } from 'recharts'
 
 const StatCard = ({ title, value, icon: Icon, color, subtext }) => (
-  <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-    <div className="flex items-center justify-between mb-2">
-      <span className="text-gray-400 text-sm">{title}</span>
-      <Icon className={color} size={20} />
+  <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+    <div className="flex items-center justify-between mb-1">
+      <span className="text-gray-400 text-xs">{title}</span>
+      <Icon className={color} size={14} />
     </div>
-    <div className="text-2xl font-bold">{value}</div>
-    {subtext && <div className="text-sm text-gray-500 mt-1">{subtext}</div>}
+    <div className="text-lg font-bold">{value}</div>
+    {subtext && <div className="text-xs text-gray-500">{subtext}</div>}
   </div>
 )
 
@@ -75,36 +75,36 @@ export default function Performance() {
   const stats = performance?.stats || {}
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">Performance</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold">Performance</h1>
           {brokerMode?.mode === 'oanda' && (
-            <span className="px-2 py-1 bg-blue-900 text-blue-300 text-xs rounded-full">
+            <span className="px-2 py-0.5 bg-blue-900 text-blue-300 text-xs rounded-full">
               OANDA Demo
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Calendar size={18} className="text-gray-400" />
+          <Calendar size={14} className="text-gray-400" />
           <select
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm"
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
           >
-            <option value={7}>Last 7 days</option>
-            <option value={30}>Last 30 days</option>
-            <option value={90}>Last 90 days</option>
+            <option value={7}>7D</option>
+            <option value={30}>30D</option>
+            <option value={90}>90D</option>
           </select>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-gray-400">Loading performance data...</div>
+        <div className="text-center py-8 text-gray-400">Loading...</div>
       ) : (
         <>
           {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
             <StatCard
               title="Total P&L"
               value={`${stats.total_pnl >= 0 ? '+' : ''}$${stats.total_pnl?.toFixed(2) || '0.00'}`}
@@ -134,35 +134,35 @@ export default function Performance() {
           </div>
 
           {/* Additional Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-              <div className="text-gray-400 text-sm mb-2">Profit Factor</div>
-              <div className="text-3xl font-bold">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+              <div className="text-gray-400 text-xs mb-1">Profit Factor</div>
+              <div className="text-xl font-bold">
                 {stats.profit_factor?.toFixed(2) || '0.00'}
               </div>
-              <div className="text-sm text-gray-500 mt-1">
-                {stats.profit_factor >= 1.5 ? 'Good' : stats.profit_factor >= 1 ? 'Break-even' : 'Needs improvement'}
+              <div className="text-xs text-gray-500">
+                {stats.profit_factor >= 1.5 ? 'Good' : stats.profit_factor >= 1 ? 'Break-even' : 'Needs work'}
               </div>
             </div>
-            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-              <div className="text-gray-400 text-sm mb-2">Avg P&L %</div>
-              <div className={`text-3xl font-bold ${stats.avg_pnl_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+              <div className="text-gray-400 text-xs mb-1">Avg P&L %</div>
+              <div className={`text-xl font-bold ${stats.avg_pnl_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                 {stats.avg_pnl_percent >= 0 ? '+' : ''}{stats.avg_pnl_percent?.toFixed(2) || '0.00'}%
               </div>
             </div>
-            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-              <div className="text-gray-400 text-sm mb-2">Breakeven Trades</div>
-              <div className="text-3xl font-bold">
+            <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+              <div className="text-gray-400 text-xs mb-1">Breakeven</div>
+              <div className="text-xl font-bold">
                 {stats.breakeven_trades || 0}
               </div>
             </div>
           </div>
 
           {/* Cumulative P&L Chart */}
-          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-            <h2 className="text-lg font-semibold mb-4">Cumulative P&L</h2>
+          <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+            <h2 className="text-sm font-semibold mb-2">Cumulative P&L</h2>
             {performance?.cumulative_pnl?.length > 0 ? (
-              <div className="h-80">
+              <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={performance.cumulative_pnl}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -188,17 +188,17 @@ export default function Performance() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="h-80 flex items-center justify-center text-gray-500">
-                No data available for this period
+              <div className="h-48 flex items-center justify-center text-gray-500 text-xs">
+                No data
               </div>
             )}
           </div>
 
           {/* Daily P&L Chart */}
-          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-            <h2 className="text-lg font-semibold mb-4">Daily P&L</h2>
+          <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+            <h2 className="text-sm font-semibold mb-2">Daily P&L</h2>
             {performance?.daily_pnl?.length > 0 ? (
-              <div className="h-64">
+              <div className="h-40">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={performance.daily_pnl}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -225,40 +225,40 @@ export default function Performance() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="h-64 flex items-center justify-center text-gray-500">
-                No data available for this period
+              <div className="h-40 flex items-center justify-center text-gray-500 text-xs">
+                No data
               </div>
             )}
           </div>
 
           {/* Performance by Symbol */}
           {performance?.by_symbol?.length > 0 && (
-            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <BarChart3 size={20} />
-                Performance by Symbol
+            <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <BarChart3 size={14} />
+                By Symbol
               </h2>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-gray-700">
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Symbol</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Trades</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Win Rate</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Total P&L</th>
+                      <th className="px-2 py-2 text-left text-gray-400 uppercase">Symbol</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">Trades</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">Win Rate</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">P&L</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700">
                     {performance.by_symbol.map((sym) => (
                       <tr key={sym.symbol} className="hover:bg-gray-750">
-                        <td className="px-4 py-4 font-medium">{sym.symbol}</td>
-                        <td className="px-4 py-4 text-right">{sym.total_trades}</td>
-                        <td className="px-4 py-4 text-right">
+                        <td className="px-2 py-2 font-medium">{sym.symbol}</td>
+                        <td className="px-2 py-2 text-right">{sym.total_trades}</td>
+                        <td className="px-2 py-2 text-right">
                           <span className={sym.win_rate >= 50 ? 'text-green-400' : 'text-red-400'}>
                             {sym.win_rate.toFixed(1)}%
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-right">
+                        <td className="px-2 py-2 text-right">
                           <span className={`font-mono ${sym.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {sym.total_pnl >= 0 ? '+' : ''}${sym.total_pnl.toFixed(2)}
                           </span>

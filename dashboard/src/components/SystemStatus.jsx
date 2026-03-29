@@ -9,16 +9,6 @@ import {
   RefreshCw
 } from 'lucide-react'
 
-const StatusIndicator = ({ ok, label, icon: Icon }) => (
-  <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-    ok ? 'bg-green-900/30 border border-green-700' : 'bg-red-900/30 border border-red-700'
-  }`}>
-    <div className={`w-3 h-3 rounded-full ${ok ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-    <Icon className={ok ? 'text-green-400' : 'text-red-400'} size={16} />
-    <span className={ok ? 'text-green-400' : 'text-red-400'}>{label}</span>
-  </div>
-)
-
 const SystemStatus = () => {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -45,66 +35,51 @@ const SystemStatus = () => {
 
   if (loading) {
     return (
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-        <div className="animate-pulse space-y-2">
-          <div className="h-4 bg-gray-700 rounded w-1/4"></div>
-          <div className="h-8 bg-gray-700 rounded w-3/4"></div>
+      <div className="bg-gray-800 rounded-xl p-2 border border-gray-700">
+        <div className="animate-pulse flex items-center gap-2">
+          <div className="h-3 w-3 bg-gray-700 rounded"></div>
+          <div className="h-3 bg-gray-700 rounded w-20"></div>
         </div>
       </div>
     )
   }
 
+  const items = [
+    { key: 'redis', label: 'Redis', ok: status?.redis, icon: Zap },
+    { key: 'database', label: 'DB', ok: status?.database, icon: Database },
+    { key: 'feed', label: 'Feed', ok: status?.feed, icon: Activity },
+    { key: 'engine', label: 'Engine', ok: status?.engine, icon: Server },
+    { key: 'oanda', label: 'OANDA', ok: status?.oanda, icon: Globe },
+  ]
+
+  const allOk = status?.all_ok
+
   return (
-    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <Server size={20} className="text-gray-400" />
-          System Status
-        </h2>
-        <button
-          onClick={fetchStatus}
-          className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
-          title="Refresh"
-        >
-          <RefreshCw size={16} className="text-gray-400" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
-        <StatusIndicator ok={status?.redis} label="Redis" icon={Zap} />
-        <StatusIndicator ok={status?.database} label="Database" icon={Database} />
-        <StatusIndicator ok={status?.feed} label="Feed" icon={Activity} />
-        <StatusIndicator ok={status?.engine} label="Engine" icon={Server} />
-        <StatusIndicator ok={status?.oanda} label="OANDA" icon={Globe} />
-      </div>
-
+    <div className="bg-gray-800 rounded-xl p-2 border border-gray-700">
       <div className="flex items-center justify-between">
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-          status?.all_ok
-            ? 'bg-green-900/30 border border-green-700'
-            : 'bg-yellow-900/30 border border-yellow-700'
-        }`}>
-          <div className={`w-3 h-3 rounded-full ${
-            status?.all_ok ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'
-          }`} />
-          <span className={status?.all_ok ? 'text-green-400' : 'text-yellow-400'}>
-            {status?.all_ok ? 'All Systems Operational' : 'Some Systems Issue'}
+        <div className="flex items-center gap-1">
+          <div className={`w-2 h-2 rounded-full ${allOk ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+          <span className={`text-xs font-medium ${allOk ? 'text-green-400' : 'text-red-400'}`}>
+            {allOk ? 'All Systems OK' : 'System Issue'}
           </span>
         </div>
-        {lastUpdate && (
-          <span className="text-xs text-gray-500">
-            Updated {lastUpdate.toLocaleTimeString()}
-          </span>
-        )}
-      </div>
-
-      <div className="mt-4 flex gap-2">
-        <Link
-          to="/logs"
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm transition-colors"
-        >
-          View Logs
-        </Link>
+        <div className="flex items-center gap-2">
+          {items.map(item => (
+            <div key={item.key} className="flex items-center gap-0.5" title={`${item.label}: ${item.ok ? 'OK' : 'DOWN'}`}>
+              <item.icon size={10} className={item.ok ? 'text-green-500' : 'text-red-500'} />
+              <span className={`text-xs ${item.ok ? 'text-green-500' : 'text-red-500'}`}>
+                {item.ok ? '✓' : '✗'}
+              </span>
+            </div>
+          ))}
+          <button
+            onClick={fetchStatus}
+            className="p-1 hover:bg-gray-700 rounded transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={10} className="text-gray-400" />
+          </button>
+        </div>
       </div>
     </div>
   )

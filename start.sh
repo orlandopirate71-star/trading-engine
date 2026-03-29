@@ -73,7 +73,7 @@ else
     echo -e "${YELLOW}! Data feeds may have issues. Check logs/feeds.log${NC}"
 fi
 
-# Start dashboard
+# Start dashboard (Vite dev server with proxy)
 echo -e "${YELLOW}Starting dashboard...${NC}"
 cd dashboard
 npm run dev > ../logs/dashboard.log 2>&1 &
@@ -85,6 +85,22 @@ if kill -0 $DASH_PID 2>/dev/null; then
     echo -e "${GREEN}✓ Dashboard running (PID: $DASH_PID)${NC}"
 else
     echo -e "${YELLOW}! Dashboard may have issues. Check logs/dashboard.log${NC}"
+fi
+
+# Launch dashboard in dedicated browser window
+echo -e "${YELLOW}Opening dashboard in Chromium...${NC}"
+chromium-browser --app=http://localhost:3000 \
+    --window-size=1920,1080 \
+    --disable-extensions \
+    --disable-dev-tools \
+    --user-data-dir=/tmp/chromium-trading \
+    > /dev/null 2>&1 &
+BROWSER_PID=$!
+sleep 1
+if kill -0 $BROWSER_PID 2>/dev/null; then
+    echo -e "${GREEN}✓ Dashboard opened in Chromium (PID: $BROWSER_PID)${NC}"
+else
+    echo -e "${YELLOW}! Failed to open Chromium. Dashboard still available at http://localhost:3000${NC}"
 fi
 
 # Save PIDs for stop script
