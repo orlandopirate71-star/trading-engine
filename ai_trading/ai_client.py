@@ -35,17 +35,22 @@ class AIClient:
         primary: Provider = Provider.OLLAMA,
         ollama_base: str = "http://localhost:11434",
         ollama_model: str = "gpt-oss:120b-cloud",  # Default to cloud model
+        ollama_backup_base: Optional[str] = None,  # Backup Ollama server
+        ollama_backup_model: str = "gpt-oss:120b-cloud",  # Backup model
         anthropic_api_key: Optional[str] = None,
         anthropic_model: str = "claude-sonnet-4-20250514"
     ):
         self.primary = primary
         self.ollama_base = ollama_base
         self.ollama_model = ollama_model
+        self.ollama_backup_base = ollama_backup_base
+        self.ollama_backup_model = ollama_backup_model
         self.anthropic_api_key = anthropic_api_key
         self.anthropic_model = anthropic_model
 
         # Track which provider was last used
         self._last_successful: Optional[Provider] = None
+        self._using_backup = False
 
     def generate(
         self,
@@ -67,10 +72,32 @@ class AIClient:
                     prompt, system, max_tokens, temperature, timeout
                 )
             except Exception as e:
-                print(f"[AI] Ollama failed: {e}, trying Anthropic...")
+                print(f"[AI] Primary Ollama failed: {e}")
+                
+                # Try backup Ollama server if configured
+                if self.ollama_backup_base:
+                    try:
+                        print(f"[AI] Trying backup Ollama server at {self.ollama_backup_base}...")
+                        return self._ollama_generate(
+                            prompt, system, max_tokens, temperature, timeout,
+                            base_override=self.ollama_backup_base,
+                            model_override=self.ollama_backup_model
+                        )
+                    except Exception as backup_e:
+                        print(f"[AI] Backup Ollama failed: {backup_e}")
+                
+                # Try Anthropic as next fallback
+                if self.anthropic_api_key:
+                    print(f"[AI] Trying Anthropic...")
+                    try:
+                        return self._anthropic_generate(
+                            prompt, system, max_tokens, temperature, timeout
+                        )
+                    except Exception as anthropic_e:
+                        print(f"[AI] Anthropic failed: {anthropic_e}")
 
         # Try Anthropic as fallback
-        if self.anthropic_api_key:
+        if self.primary == Provider.ANTHROPIC and self.anthropic_api_key:
             try:
                 return self._anthropic_generate(
                     prompt, system, max_tokens, temperature, timeout
@@ -86,15 +113,20 @@ class AIClient:
                 )
             except Exception as e:
                 print(f"[AI] Ollama fallback failed: {e}")
+                
+                # Try backup Ollama as last resort
+                if self.ollama_backup_base:
+                    try:
+                        print(f"[AI] Trying backup Ollama server at {self.ollama_backup_base}...")
+                        return self._ollama_generate(
+                            prompt, system, max_tokens, temperature, timeout,
+                            base_override=self.ollama_backup_base,
+                            model_override=self.ollama_backup_model
+                        )
+                    except Exception as backup_e:
+                        print(f"[AI] Backup Ollama failed: {backup_e}")
 
-        # Last resort: try llama3
-        try:
-            return self._ollama_generate(
-                prompt, system, max_tokens, temperature, timeout,
-                model_override="gpt-oss:120b-cloud"
-            )
-        except Exception as e:
-            raise RuntimeError(f"All AI providers failed: {e}")
+        raise RuntimeError(f"All AI providers failed")
 
     def _ollama_generate(
         self,
@@ -103,11 +135,13 @@ class AIClient:
         max_tokens: int,
         temperature: float,
         timeout: float,
-        model_override: Optional[str] = None
+        model_override: Optional[str] = None,
+        base_override: Optional[str] = None
     ) -> AIResponse:
         """Generate using Ollama API."""
         start_time = time.time()
         model = model_override or self.ollama_model
+        base_url = base_override or self.ollama_base
 
         # Build messages format for chat endpoint
         messages = []
@@ -116,7 +150,7 @@ class AIClient:
         messages.append({"role": "user", "content": prompt})
 
         response = requests.post(
-            f"{self.ollama_base}/api/chat",
+            f"{base_url}/api/chat",
             json={
                 "model": model,
                 "messages": messages,
@@ -135,8 +169,14 @@ class AIClient:
 
         latency_ms = (time.time() - start_time) * 1000
         self._last_successful = Provider.OLLAMA
-
-        print(f"[AI] Ollama ({model}): {latency_ms:.0f}ms")
+        
+        # Track if using backup
+        if base_override:
+            self._using_backup = True
+            print(f"[AI] Backup Ollama ({model}): {latency_ms:.0f}ms")
+        else:
+            self._using_backup = False
+            print(f"[AI] Ollama ({model}): {latency_ms:.0f}ms")
 
         return AIResponse(
             content=content,

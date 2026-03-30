@@ -288,23 +288,32 @@ class TradingEngine:
                         except (ValueError, TypeError):
                             pass
                     
-                    # Get recent candles for AI analysis
-                    recent_candles = []
+                    # Get recent candles for AI analysis from multiple timeframes
+                    recent_candles = {}
                     try:
-                        # Get last 20 M5 candles for context
-                        candles = self.candle_aggregator.get_candles(symbol, Timeframe.M5, limit=20)
-                        if candles:
-                            recent_candles = [
-                                {
-                                    "time": c.time.isoformat() if hasattr(c.time, 'isoformat') else str(c.time),
-                                    "open": float(c.open),
-                                    "high": float(c.high),
-                                    "low": float(c.low),
-                                    "close": float(c.close),
-                                    "volume": int(c.volume)
-                                }
-                                for c in candles[-20:]  # Last 20 candles
-                            ]
+                        # Fetch candles from multiple timeframes for comprehensive analysis
+                        timeframes_to_fetch = [
+                            (Timeframe.M5, 20),
+                            (Timeframe.M15, 20),
+                            (Timeframe.M30, 20),
+                            (Timeframe.H1, 20),
+                            (Timeframe.H4, 20)
+                        ]
+                        
+                        for tf, count in timeframes_to_fetch:
+                            candles = self.candle_aggregator.get_candles(symbol, tf, count=count)
+                            if candles:
+                                recent_candles[tf.name] = [
+                                    {
+                                        "time": c.timestamp.isoformat() if hasattr(c.timestamp, 'isoformat') else str(c.timestamp),
+                                        "open": float(c.open),
+                                        "high": float(c.high),
+                                        "low": float(c.low),
+                                        "close": float(c.close),
+                                        "volume": int(c.volume)
+                                    }
+                                    for c in candles[-count:]
+                                ]
                     except Exception as e:
                         print(f"[ENGINE] Error fetching candles for {symbol}: {e}")
                     

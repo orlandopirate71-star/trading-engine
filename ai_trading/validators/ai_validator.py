@@ -44,11 +44,13 @@ class AITradeValidator:
             require_approval: If True, approved signals need manual confirmation
             ollama_model: Model to use for Ollama
         """
-        # Initialize AI client with working local model
+        # Initialize AI client with working local model and backup server
         init_ai_client(
             primary=Provider.OLLAMA,
             ollama_model=ollama_model,
-            ollama_base="http://localhost:11434"
+            ollama_base="http://localhost:11434",
+            ollama_backup_base="http://192.168.0.35:11434",
+            ollama_backup_model="gpt-oss:120b-cloud"
         )
 
         self.validator = SignalValidator(

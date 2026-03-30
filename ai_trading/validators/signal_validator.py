@@ -196,12 +196,18 @@ class SignalValidator:
     def _update_brain(self, signal_data: dict, result: ValidationResult):
         """Update Brain with validation result for learning."""
         try:
+            from datetime import timedelta
+            
             prompt = brain_update_prompt(
                 action="VALIDATE",
                 trade_data=signal_data,
                 ai_reasoning=result.reasoning,
                 outcome="pending"
             )
+            
+            # Add expiry timestamp (24 hours from now)
+            expires_at = (datetime.utcnow() + timedelta(days=1)).isoformat()
+            
             self.brain.add_memory(
                 content=prompt,
                 memory_type="signal_validation",
@@ -210,7 +216,9 @@ class SignalValidator:
                     "strategy_name": signal_data.get("strategy_name"),
                     "direction": signal_data.get("direction"),
                     "approved": result.approved,
-                    "confidence": result.confidence
+                    "confidence": result.confidence,
+                    "expires_at": expires_at,  # Mark for deletion after 24 hours
+                    "created_at": datetime.utcnow().isoformat()
                 }
             )
         except Exception as e:
