@@ -89,54 +89,36 @@ const OpenPosition = ({ position }) => {
   const isProfit = position.unrealized_pnl >= 0
 
   return (
-    <div className="p-2 bg-gray-800 rounded-lg border border-gray-700">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <div className={`px-2 py-0.5 rounded text-xs font-bold ${
+    <div className="p-1.5 bg-gray-800 rounded border border-gray-700 hover:bg-gray-750 transition-colors">
+      <div className="flex items-center justify-between gap-2 text-xs">
+        {/* Left: Direction + Symbol + Strategy */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <div className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
             position.direction === 'long' ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'
           }`}>
-            {position.direction?.toUpperCase()}
+            {position.direction === 'long' ? 'L' : 'S'}
           </div>
-          <span className="font-medium text-xs">{position.symbol}</span>
-          <span className={`px-2 py-0.5 rounded text-xs ${
-            position.broker === 'oanda' ? 'bg-blue-900 text-blue-400' : 'bg-gray-700 text-gray-400'
-          }`}>
-            {position.broker === 'oanda' ? 'OANDA' : 'Paper'}
-          </span>
+          <span className="font-medium">{position.symbol}</span>
+          <span className="text-yellow-400 truncate text-[10px]">{position.strategy_name}</span>
         </div>
-        <div className={`font-mono font-bold text-xs ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-          {isProfit ? '+' : ''}{position.unrealized_pnl?.toFixed(4)}
-        </div>
-      </div>
-      <div className="text-xs text-gray-500 mb-1">{position.strategy_name}</div>
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <div>
-          <div className="text-gray-400">Entry</div>
-          <div className="font-mono">{position.entry_price?.toLocaleString()}</div>
-        </div>
-        <div>
-          <div className="text-gray-400">Current</div>
-          <div className="font-mono">{position.current_price?.toLocaleString()}</div>
-        </div>
-        <div>
-          <div className="text-gray-400">Qty</div>
-          <div className="font-mono">{position.quantity}</div>
-        </div>
-      </div>
-      {(position.stop_loss || position.take_profit) && (
-        <div className="flex gap-4 mt-2 pt-2 border-t border-gray-700 text-xs">
+        
+        {/* Middle: Prices + SL/TP */}
+        <div className="flex items-center gap-2 text-[10px]">
+          <span className="text-gray-400">E:{position.entry_price?.toFixed(position.symbol?.includes('JPY') ? 3 : 5)}</span>
+          <span className="text-gray-300">C:{position.current_price?.toFixed(position.symbol?.includes('JPY') ? 3 : 5)}</span>
           {position.stop_loss && (
-            <div className="text-red-400">
-              SL: {position.stop_loss?.toLocaleString()}
-            </div>
+            <span className="text-red-400">SL:{position.stop_loss?.toFixed(position.symbol?.includes('JPY') ? 3 : 5)}</span>
           )}
           {position.take_profit && (
-            <div className="text-green-400">
-              TP: {position.take_profit?.toLocaleString()}
-            </div>
+            <span className="text-green-400">TP:{position.take_profit?.toFixed(position.symbol?.includes('JPY') ? 3 : 5)}</span>
           )}
         </div>
-      )}
+        
+        {/* Right: P&L */}
+        <div className={`font-mono font-bold whitespace-nowrap ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
+          {isProfit ? '+' : ''}{position.unrealized_pnl?.toFixed(2)}
+        </div>
+      </div>
     </div>
   )
 }

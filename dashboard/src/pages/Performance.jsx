@@ -33,12 +33,14 @@ const StatCard = ({ title, value, icon: Icon, color, subtext }) => (
 
 export default function Performance() {
   const [performance, setPerformance] = useState(null)
+  const [strategyPerformance, setStrategyPerformance] = useState(null)
   const [days, setDays] = useState(30)
   const [loading, setLoading] = useState(true)
   const [brokerMode, setBrokerMode] = useState(null)
 
   useEffect(() => {
     fetchPerformance()
+    fetchStrategyPerformance()
   }, [days])
 
   const fetchPerformance = async () => {
@@ -70,6 +72,16 @@ export default function Performance() {
       console.error('Failed to fetch performance:', err)
     }
     setLoading(false)
+  }
+
+  const fetchStrategyPerformance = async () => {
+    try {
+      const res = await fetch(`/api/strategy-performance?days=${days}`)
+      const data = await res.json()
+      setStrategyPerformance(data)
+    } catch (err) {
+      console.error('Failed to fetch strategy performance:', err)
+    }
   }
 
   const stats = performance?.stats || {}
@@ -267,6 +279,68 @@ export default function Performance() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* Strategy Performance */}
+          {strategyPerformance?.strategies?.length > 0 && (
+            <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <BarChart3 size={14} />
+                Strategy Performance
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-700">
+                      <th className="px-2 py-2 text-left text-gray-400 uppercase">Strategy</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">Trades</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">W/L</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">Win%</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">Total P&L</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">Avg P&L</th>
+                      <th className="px-2 py-2 text-right text-gray-400 uppercase">P.Factor</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-700">
+                    {strategyPerformance.strategies.map((strat) => (
+                      <tr key={strat.strategy} className="hover:bg-gray-750">
+                        <td className="px-2 py-2 font-medium">{strat.strategy}</td>
+                        <td className="px-2 py-2 text-right">{strat.total_trades}</td>
+                        <td className="px-2 py-2 text-right text-gray-400">
+                          {strat.winning_trades}/{strat.losing_trades}
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <span className={strat.win_rate >= 50 ? 'text-green-400' : 'text-red-400'}>
+                            {strat.win_rate.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <span className={`font-mono font-semibold ${strat.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {strat.total_pnl >= 0 ? '+' : ''}${strat.total_pnl.toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <span className={`font-mono ${strat.avg_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {strat.avg_pnl >= 0 ? '+' : ''}${strat.avg_pnl.toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <span className={strat.profit_factor >= 1.5 ? 'text-green-400' : strat.profit_factor >= 1 ? 'text-yellow-400' : 'text-red-400'}>
+                            {strat.profit_factor.toFixed(2)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-2 pt-2 border-t border-gray-700 text-xs text-gray-400">
+                <div className="flex justify-between">
+                  <span>Total: {strategyPerformance.total_strategies} strategies</span>
+                  <span>Period: {days} days</span>
+                </div>
               </div>
             </div>
           )}

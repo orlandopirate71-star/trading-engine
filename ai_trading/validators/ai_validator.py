@@ -119,15 +119,28 @@ class AITradeValidator:
         # Get 24h market info from OANDA
         market_info = None
         try:
-            from connections import get_db_connection
+            import json
+            from pathlib import Path
             from oanda_broker import OandaBroker
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT oanda_account_id, oanda_api_token FROM settings WHERE id=1")
-            row = cur.fetchone()
-            conn.close()
-            if row and row[0] and row[1]:
-                broker = OandaBroker(row[0], row[1], practice=True)
+            
+            # Load OANDA credentials from feed_config.json
+            config_path = Path(__file__).parent.parent.parent / "feed_config.json"
+            with open(config_path) as f:
+                config = json.load(f)
+            
+            # Find OANDA feed config
+            oanda_config = None
+            for feed in config.get("feeds", []):
+                if feed.get("type") == "oanda" and feed.get("enabled"):
+                    oanda_config = feed
+                    break
+            
+            if oanda_config:
+                broker = OandaBroker(
+                    oanda_config["account_id"],
+                    oanda_config["api_token"],
+                    practice=oanda_config.get("practice", True)
+                )
                 candles = broker.get_instrument_candles(signal.symbol, "D1", count=2)
                 if candles and len(candles) >= 2:
                     current_candle = candles[0]  # Most recent

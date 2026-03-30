@@ -26,7 +26,10 @@ class EMACrossoverStrategy(BaseStrategy):
     def __init__(self, params: dict = None):
         super().__init__(params)
         
-        self.ind = Indicators(max_history=200)
+        self.indicators = {}  # Per-symbol indicators
+        self.last_signal_time = {}  # Per-symbol cooldown
+        self.prev_fast_ema = {}  # Per-symbol previous fast EMA
+        self.prev_slow_ema = {}  # Per-symbol previous slow EMA
         
         # EMA periods
         self.fast_period = self.params.get("fast_period", 9)
@@ -44,50 +47,53 @@ class EMACrossoverStrategy(BaseStrategy):
         self.risk_reward = self.params.get("risk_reward", 2.0)
         
         # Cooldown
-        self.cooldown_ticks = self.params.get("cooldown_ticks", 50)
-        self.ticks_since_signal = self.cooldown_ticks
-        
-        # Previous EMAs for crossover detection
-        self.prev_fast_ema = None
-        self.prev_slow_ema = None
+        self.cooldown_minutes = self.params.get("cooldown_minutes", 2)
     
     def on_tick(self, symbol: str, price: float, timestamp: datetime) -> Optional[TradeSignal]:
-        self.ind.add(price)
-        self.ticks_since_signal += 1
+        # Initialize per-symbol state
+        if symbol not in self.indicators:
+            self.indicators[symbol] = Indicators(max_history=200)
+            self.prev_fast_ema[symbol] = None
+            self.prev_slow_ema[symbol] = None
+        
+        # Check cooldown
+        if symbol in self.last_signal_time:
+            time_since_signal = (timestamp - self.last_signal_time[symbol]).total_seconds() / 60
+            if time_since_signal < self.cooldown_minutes:
+                return None
+        
+        # Add price to indicators
+        self.indicators[symbol].add(price)
         
         # Need enough data
-        if self.ind.count < self.slow_period + 10:
-            return None
-        
-        # Cooldown
-        if self.ticks_since_signal < self.cooldown_ticks:
+        if self.indicators[symbol].count < self.slow_period + 10:
             return None
         
         # Calculate indicators
-        fast_ema = self.ind.ema(self.fast_period)
-        slow_ema = self.ind.ema(self.slow_period)
-        adx = self.ind.adx(self.adx_period)
-        atr = self.ind.atr(self.atr_period)
+        fast_ema = self.indicators[symbol].ema(self.fast_period)
+        slow_ema = self.indicators[symbol].ema(self.slow_period)
+        adx = self.indicators[symbol].adx(self.adx_period)
+        atr = self.indicators[symbol].atr(self.atr_period)
         
         if None in (fast_ema, slow_ema, atr):
-            self.prev_fast_ema = fast_ema
-            self.prev_slow_ema = slow_ema
+            self.prev_fast_ema[symbol] = fast_ema
+            self.prev_slow_ema[symbol] = slow_ema
             return None
         
         # Check for crossover
-        bullish_cross = (self.prev_fast_ema is not None and 
-                        self.prev_slow_ema is not None and
-                        self.prev_fast_ema <= self.prev_slow_ema and 
+        bullish_cross = (self.prev_fast_ema[symbol] is not None and 
+                        self.prev_slow_ema[symbol] is not None and
+                        self.prev_fast_ema[symbol] <= self.prev_slow_ema[symbol] and 
                         fast_ema > slow_ema)
         
-        bearish_cross = (self.prev_fast_ema is not None and 
-                        self.prev_slow_ema is not None and
-                        self.prev_fast_ema >= self.prev_slow_ema and 
+        bearish_cross = (self.prev_fast_ema[symbol] is not None and 
+                        self.prev_slow_ema[symbol] is not None and
+                        self.prev_fast_ema[symbol] >= self.prev_slow_ema[symbol] and 
                         fast_ema < slow_ema)
         
         # Update previous values
-        self.prev_fast_ema = fast_ema
-        self.prev_slow_ema = slow_ema
+        self.prev_fast_ema[symbol] = fast_ema
+        self.prev_slow_ema[symbol] = slow_ema
         
         # ADX filter - only trade in trending markets
         trending = adx is None or adx > self.adx_threshold
@@ -97,7 +103,7 @@ class EMACrossoverStrategy(BaseStrategy):
         
         # Long signal
         if bullish_cross and trending:
-            self.ticks_since_signal = 0
+            self.last_signal_time[symbol] = timestamp
             stop_loss = price - stop_distance
             take_profit = price + (stop_distance * self.risk_reward)
             
@@ -120,7 +126,7 @@ class EMACrossoverStrategy(BaseStrategy):
         
         # Short signal
         if bearish_cross and trending:
-            self.ticks_since_signal = 0
+            self.last_signal_time[symbol] = timestamp
             stop_loss = price + stop_distance
             take_profit = price - (stop_distance * self.risk_reward)
             

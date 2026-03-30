@@ -684,14 +684,46 @@ def get_open_positions_api():
                 "trailing_stop_activated": p.trailing_stop_activated
             })
     
-    # Add OANDA trades if broker is available
-    if engine.oanda_broker:
+    # Get OANDA positions if in OANDA mode
+    if engine.broker_mode == "oanda" and engine.oanda_broker:
         oanda_trades = engine.oanda_broker.get_open_trades()
+        
+        # Get strategy names from database for OANDA trades
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT symbol, strategy_name, metadata
+            FROM trades
+            WHERE status = 'open' AND strategy_name IS NOT NULL
+            ORDER BY entry_time DESC
+        """)
+        
+        # Build lookup by OANDA order ID and by symbol
+        strategy_lookup = {}
+        symbol_strategy = {}
+        
+        for row in cur.fetchall():
+            db_symbol, strategy_name, metadata = row
+            if metadata and isinstance(metadata, dict):
+                oanda_order_id = metadata.get('oanda_order_id')
+                if oanda_order_id:
+                    strategy_lookup[str(oanda_order_id)] = strategy_name
+            
+            # Keep most recent strategy per symbol as fallback
+            if db_symbol not in symbol_strategy:
+                symbol_strategy[db_symbol] = strategy_name
+        
+        cur.close()
+        conn.close()
+        
         for t in oanda_trades:
             # Convert instrument format (EUR_USD -> EURUSD)
             symbol = t["instrument"].replace("_", "")
             units = t["units"]
             direction = "long" if units > 0 else "short"
+            
+            # Look up strategy name
+            strategy_name = strategy_lookup.get(str(t['id'])) or symbol_strategy.get(symbol) or "Manual/OANDA"
             
             positions_list.append({
                 "trade_id": f"oanda_{t['id']}",
@@ -706,7 +738,7 @@ def get_open_positions_api():
                 "unrealized_pnl_pct": (t["unrealized_pnl"] / (t["price"] * abs(units))) * 100 if t["price"] and units else 0,
                 "is_profitable": t["unrealized_pnl"] >= 0,
                 "opened_at": t["open_time"],
-                "strategy_name": "Manual/OANDA",
+                "strategy_name": strategy_name,
                 "broker": "oanda"
             })
     
@@ -1379,41 +1411,40 @@ def get_oanda_trade_history(limit: int = Query(default=50, le=100)):
             db_conn = get_db_connection()
             db_cur = db_conn.cursor()
 
-            # Get closed trades from DB that have oanda_order_id in metadata
+            # Get all trades from DB (both open and closed) with strategy names
             db_cur.execute("""
-                SELECT id, symbol, strategy_name, metadata
+                SELECT id, symbol, strategy_name, metadata, entry_time, exit_time, status
                 FROM trades
-                WHERE status = 'closed' AND metadata IS NOT NULL
-                ORDER BY exit_time DESC
+                WHERE strategy_name IS NOT NULL
+                ORDER BY COALESCE(exit_time, entry_time, signal_time) DESC
                 LIMIT %s
-            """, (limit,))
+            """, (limit * 2,))
 
-            # Build a lookup: (symbol, strategy_name) -> strategy_name from most recent
+            # Build a lookup by OANDA order ID and by symbol
             db_strategies = {}
+            symbol_strategies = {}
+            
             for row in db_cur.fetchall():
-                trade_id, db_symbol, strategy_name, metadata = row
+                trade_id, db_symbol, strategy_name, metadata, entry_time, exit_time, status = row
+                
+                # Match by OANDA order ID if available
                 if metadata and isinstance(metadata, dict):
                     oanda_order_id = metadata.get('oanda_order_id')
                     if oanda_order_id:
-                        # Match by OANDA order ID
-                        db_strategies[oanda_order_id] = strategy_name
-
-            # Also build a time-based lookup as fallback
-            # Group by symbol and take the most recent strategy for each
-            for row in db_cur.fetchall():
-                trade_id, db_symbol, strategy_name, metadata = row
-                # Store by symbol, keep the most recent (first since ordered by exit_time DESC)
-                if db_symbol not in db_strategies:
-                    db_strategies[f"symbol_{db_symbol}"] = strategy_name
+                        db_strategies[str(oanda_order_id)] = strategy_name
+                
+                # Also keep most recent strategy per symbol as fallback
+                if db_symbol not in symbol_strategies:
+                    symbol_strategies[db_symbol] = strategy_name
 
             db_cur.close()
             db_conn.close()
 
             # Apply strategy names to trades
             for trade in trades:
-                # Try to find strategy from DB
-                matched_strategy = db_strategies.get(trade["id"]) or db_strategies.get(f"symbol_{trade['symbol']}")
-                trade["strategy_name"] = matched_strategy or "OANDA"
+                # Try to find strategy: first by order ID, then by symbol
+                matched_strategy = db_strategies.get(str(trade["id"])) or symbol_strategies.get(trade["symbol"])
+                trade["strategy_name"] = matched_strategy or "Manual/OANDA"
 
             return {
                 "trades": trades,
@@ -1788,6 +1819,108 @@ def set_bucket_auto_close(bucket_name: str, enabled: bool = True):
         _buckets[bucket_name] = TradeBucket(bucket_name)
     _buckets[bucket_name].auto_close_if_profit = enabled
     return {"success": True, "auto_close": enabled}
+
+
+# === Strategy Performance ===
+
+@app.get("/api/strategy-performance")
+def get_strategies_performance(days: int = Query(default=7, ge=1, le=90)):
+    """
+    Get performance metrics for all strategies.
+    
+    Args:
+        days: Number of days to analyze (1-90, default 7)
+    
+    Returns:
+        List of strategy performance metrics sorted by total PnL
+    """
+    try:
+        from datetime import timedelta
+        
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        period_end = datetime.utcnow()
+        period_start = period_end - timedelta(days=days)
+        
+        # Get unique strategies
+        cur.execute("""
+            SELECT DISTINCT strategy_name FROM trades
+            WHERE signal_time >= %s
+            ORDER BY strategy_name
+        """, (period_start,))
+        
+        strategies = [row[0] for row in cur.fetchall() if row[0]]
+        results = []
+        
+        for strategy in strategies:
+            # Get trade stats
+            cur.execute("""
+                SELECT 
+                    COUNT(*) as total_trades,
+                    SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses,
+                    SUM(pnl) as total_pnl,
+                    AVG(pnl) as avg_pnl,
+                    MAX(pnl) as max_pnl,
+                    MIN(pnl) as min_pnl,
+                    AVG(CASE WHEN pnl > 0 THEN pnl END) as avg_win,
+                    AVG(CASE WHEN pnl < 0 THEN pnl END) as avg_loss,
+                    SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END) as gross_profit,
+                    SUM(CASE WHEN pnl < 0 THEN ABS(pnl) ELSE 0 END) as gross_loss
+                FROM trades
+                WHERE strategy_name = %s 
+                AND status IN ('closed', 'open')
+                AND signal_time >= %s
+            """, (strategy, period_start))
+            
+            trade_stats = cur.fetchone()
+            
+            total_trades = trade_stats[0] or 0
+            wins = trade_stats[1] or 0
+            losses = trade_stats[2] or 0
+            total_pnl = float(trade_stats[3] or 0)
+            avg_pnl = float(trade_stats[4] or 0)
+            max_pnl = float(trade_stats[5] or 0)
+            min_pnl = float(trade_stats[6] or 0)
+            avg_win = float(trade_stats[7] or 0)
+            avg_loss = float(trade_stats[8] or 0)
+            gross_profit = float(trade_stats[9] or 0)
+            gross_loss = float(trade_stats[10] or 0)
+            
+            win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+            profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
+            
+            results.append({
+                "strategy": strategy,
+                "total_trades": total_trades,
+                "winning_trades": wins,
+                "losing_trades": losses,
+                "win_rate": round(win_rate, 2),
+                "total_pnl": round(total_pnl, 2),
+                "avg_pnl": round(avg_pnl, 2),
+                "max_pnl": round(max_pnl, 2),
+                "min_pnl": round(min_pnl, 2),
+                "avg_win": round(avg_win, 2),
+                "avg_loss": round(avg_loss, 2),
+                "profit_factor": round(profit_factor, 2),
+                "gross_profit": round(gross_profit, 2),
+                "gross_loss": round(gross_loss, 2)
+            })
+        
+        cur.close()
+        conn.close()
+        
+        # Sort by total PnL descending
+        results.sort(key=lambda x: x["total_pnl"], reverse=True)
+        
+        return {
+            "strategies": results,
+            "period_days": days,
+            "total_strategies": len(results)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error calculating performance: {str(e)}")
 
 
 if __name__ == "__main__":

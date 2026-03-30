@@ -19,24 +19,25 @@ from oanda_broker import OandaBroker
 
 
 def is_market_open() -> bool:
-    """Check if forex market is currently open (weekdays 22:00-21:00 UTC)."""
+    """Check if forex market is currently open (24/5 - Sunday 22:00 UTC to Friday 22:00 UTC)."""
     now = datetime.utcnow()
     utc_hour = now.hour
-    utc_day = now.weekday()  # 0=Monday, 6=Sunday
+    utc_day = now.weekday()  # 0=Monday, 1=Tuesday, ..., 5=Saturday, 6=Sunday
 
-    # Weekend - market closed
-    if utc_day == 6:  # Saturday
+    # Saturday (5) - market closed all day
+    if utc_day == 5:
         return False
-    if utc_day == 0 and utc_hour < 22:  # Sunday before 22:00
+    
+    # Sunday (6) before 22:00 UTC - market closed
+    if utc_day == 6 and utc_hour < 22:
+        return False
+    
+    # Friday (4) after 22:00 UTC - market closed for weekend
+    if utc_day == 4 and utc_hour >= 22:
         return False
 
-    # Active trading: 22:00-21:00 UTC (Sydney/Asian session through NY close)
-    # Low activity: 21:00-22:00 UTC ( NY close through London open gap)
-    if utc_hour >= 22 or utc_hour < 6:
-        return True
-
-    # Night lull / weekend crossover - consider closed
-    return False
+    # All other times - market is open (24/5)
+    return True
 
 
 class TradingEngine:
@@ -96,11 +97,11 @@ class TradingEngine:
             try:
                 from ai_trading.validators.position_monitor import PositionMonitor
                 self.position_monitor = PositionMonitor(
-                    check_interval=30.0,
+                    check_interval=300.0,  # 5 minutes (reduced from 30s to save AI credits)
                     confidence_threshold=0.7,
                     enabled=True
                 )
-                print("[ENGINE] AI Position Monitor initialized")
+                print("[ENGINE] AI Position Monitor initialized (5min interval)")
             except Exception as e:
                 print(f"[ENGINE] Position Monitor init error: {e}")
 
@@ -244,6 +245,9 @@ class TradingEngine:
 
         # Start candle cleanup thread (runs daily)
         threading.Thread(target=self._candle_cleanup_loop, daemon=True).start()
+        
+        # Start rejected trades cleanup thread (runs every 5 minutes)
+        threading.Thread(target=self._rejected_trades_cleanup_loop, daemon=True).start()
 
     def _position_monitor_loop(self):
         """Background thread for position monitor decisions."""
@@ -264,16 +268,57 @@ class TradingEngine:
             if self.oanda_broker:
                 oanda_trades = self.oanda_broker.get_open_trades()
                 for t in oanda_trades:
+                    symbol = t["instrument"].replace("_", "")
+                    entry_price = float(t.get("price", 0))
+                    
+                    # Get current market price from last_prices cache
+                    current_price = self.last_prices.get(symbol, entry_price)
+                    
+                    # Parse stop loss and take profit
+                    stop_loss = None
+                    take_profit = None
+                    if t.get("stop_loss"):
+                        try:
+                            stop_loss = float(t["stop_loss"])
+                        except (ValueError, TypeError):
+                            pass
+                    if t.get("take_profit"):
+                        try:
+                            take_profit = float(t["take_profit"])
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    # Get recent candles for AI analysis
+                    recent_candles = []
+                    try:
+                        # Get last 20 M5 candles for context
+                        candles = self.candle_aggregator.get_candles(symbol, Timeframe.M5, limit=20)
+                        if candles:
+                            recent_candles = [
+                                {
+                                    "time": c.time.isoformat() if hasattr(c.time, 'isoformat') else str(c.time),
+                                    "open": float(c.open),
+                                    "high": float(c.high),
+                                    "low": float(c.low),
+                                    "close": float(c.close),
+                                    "volume": int(c.volume)
+                                }
+                                for c in candles[-20:]  # Last 20 candles
+                            ]
+                    except Exception as e:
+                        print(f"[ENGINE] Error fetching candles for {symbol}: {e}")
+                    
                     positions.append({
                         "trade_id": f"oanda_{t['id']}",
-                        "symbol": t["instrument"].replace("_", ""),
+                        "symbol": symbol,
                         "direction": "long" if t["units"] > 0 else "short",
-                        "entry_price": t["price"],
-                        "current_price": t["price"],
+                        "entry_price": entry_price,
+                        "current_price": current_price,
                         "quantity": abs(t["units"]),
-                        "unrealized_pnl": t.get("unrealized_pnl", 0),
-                        "stop_loss": t.get("stop_loss"),
-                        "take_profit": t.get("take_profit")
+                        "unrealized_pnl": float(t.get("unrealized_pnl", 0)),
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit,
+                        "recent_candles": recent_candles
                     })
         except Exception as e:
             print(f"[ENGINE] Error getting positions for monitor: {e}")
@@ -414,6 +459,32 @@ class TradingEngine:
                     self.candle_store.cleanup_old_candles(days=14)
                 except Exception as e:
                     print(f"[ENGINE] Candle cleanup error: {e}")
+    
+    def _rejected_trades_cleanup_loop(self):
+        """Background thread to periodically delete rejected trades older than 10 minutes."""
+        while self.running:
+            time.sleep(300)  # Run every 5 minutes
+            if self.running:
+                try:
+                    conn = get_db_connection()
+                    cur = conn.cursor()
+                    
+                    # Delete rejected trades older than 10 minutes
+                    cur.execute("""
+                        DELETE FROM trades 
+                        WHERE status = 'rejected' 
+                        AND signal_time < NOW() - INTERVAL '10 minutes'
+                    """)
+                    deleted_count = cur.rowcount
+                    
+                    if deleted_count > 0:
+                        print(f"[ENGINE] Cleaned up {deleted_count} rejected trades older than 10 minutes")
+                    
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                except Exception as e:
+                    print(f"[ENGINE] Rejected trades cleanup error: {e}")
 
     def _sync_oanda_positions(self):
         """Sync open positions with OANDA - close trades in DB that are closed on OANDA."""
@@ -614,6 +685,7 @@ class TradingEngine:
     def _process_signal(self, signal: TradeSignal, strategy=None):
         """Process a trade signal through the pipeline."""
         print(f"[ENGINE] Signal from {signal.strategy_name}: {signal.direction.value} {signal.symbol} @ {signal.entry_price}")
+        print(f"[ENGINE] Signal details: SL={signal.stop_loss}, TP={signal.take_profit}, confidence={signal.confidence}")
         
         # Check position limits before processing
         if strategy and not self._check_position_limits(strategy, signal.symbol):

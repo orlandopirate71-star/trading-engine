@@ -111,8 +111,18 @@ class OandaBroker(BrokerAPI):
         """
         instrument = self._convert_symbol(symbol)
         
+        # Convert lots to base currency units
+        # For forex: 1 lot = 100,000 units, 0.1 lots = 10,000 units
+        # For metals (XAUUSD): 1 lot = 1 troy ounce
+        if symbol.startswith("XAU") or symbol.startswith("XAG"):
+            # Metals: use quantity as-is (1 unit = 1 troy ounce)
+            base_units = int(quantity * 1)
+        else:
+            # Forex: convert lots to units (1 lot = 100,000 units)
+            base_units = int(quantity * 100000)
+        
         # OANDA uses positive units for buy, negative for sell
-        units = int(quantity) if side.upper() == "BUY" else -int(quantity)
+        units = base_units if side.upper() == "BUY" else -base_units
 
         # Round SL/TP to proper precision for this instrument
         if stop_loss:
@@ -158,18 +168,28 @@ class OandaBroker(BrokerAPI):
                 # Check if order was filled
                 if "orderFillTransaction" in data:
                     fill = data["orderFillTransaction"]
-                    order_id = fill.get("id")
                     filled_price = float(fill.get("price", 0))
                     filled_units = abs(int(float(fill.get("units", 0))))  # Handle decimal units from OANDA
+                    
+                    # Get the actual trade ID from tradeOpened transaction
+                    trade_id = None
+                    if "tradeOpened" in fill:
+                        trade_id = fill["tradeOpened"].get("tradeID")
+                    elif "tradeReduced" in fill:
+                        trade_id = fill["tradeReduced"].get("tradeID")
+                    
+                    # Fallback to transaction ID if no trade ID found
+                    if not trade_id:
+                        trade_id = fill.get("id")
                     
                     # Calculate fees (OANDA uses spread, no explicit commission)
                     fees = 0.0
                     
-                    print(f"[OANDA] {side} {filled_units} {instrument} @ {filled_price}")
+                    print(f"[OANDA] {side} {filled_units} {instrument} @ {filled_price}, Trade ID: {trade_id}")
                     
                     return OrderResult(
                         success=True,
-                        order_id=order_id,
+                        order_id=trade_id,
                         filled_price=filled_price,
                         filled_quantity=filled_units,
                         fees=fees,

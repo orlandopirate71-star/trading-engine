@@ -40,7 +40,10 @@ class MABounceStrategy(BaseStrategy):
     def __init__(self, params: dict = None):
         super().__init__(params)
         
-        self.ind = Indicators(max_history=250)
+        # Per-symbol state
+        self.indicators = {}
+        self.last_signal_time = {}
+        self.recent_prices = {}  # Per-symbol recent prices
         
         # EMA periods
         self.fast_ema = self.params.get("fast_ema", 50)
@@ -53,11 +56,7 @@ class MABounceStrategy(BaseStrategy):
         self.risk_reward = self.params.get("risk_reward", 1.5)
         
         # Cooldown
-        self.cooldown_ticks = self.params.get("cooldown_ticks", 100)
-        self.ticks_since_signal = self.cooldown_ticks
-        
-        # Track recent prices for rejection detection
-        self.recent_prices: List[float] = []
+        self.cooldown_minutes = self.params.get("cooldown_minutes", 3)
         self.touched_ema = False
         self.touch_price = None
     
@@ -68,13 +67,13 @@ class MABounceStrategy(BaseStrategy):
         distance = abs(price - ema) / ema
         return distance < self.touch_tolerance
     
-    def _is_bullish_rejection(self) -> bool:
+    def _is_bullish_rejection(self, symbol: str) -> bool:
         """Check for bullish rejection (price bounced up from EMA)."""
-        if len(self.recent_prices) < 5:
+        if len(self.recent_prices[symbol]) < 5:
             return False
         
         # Price should have dipped and recovered
-        recent = self.recent_prices[-5:]
+        recent = self.recent_prices[symbol][-5:]
         low_idx = recent.index(min(recent))
         current = recent[-1]
         low = min(recent)
@@ -82,13 +81,13 @@ class MABounceStrategy(BaseStrategy):
         # Low should be in the middle, current should be higher
         return low_idx in [1, 2, 3] and current > low * 1.001
     
-    def _is_bearish_rejection(self) -> bool:
+    def _is_bearish_rejection(self, symbol: str) -> bool:
         """Check for bearish rejection (price bounced down from EMA)."""
-        if len(self.recent_prices) < 5:
+        if len(self.recent_prices[symbol]) < 5:
             return False
         
         # Price should have spiked and fallen
-        recent = self.recent_prices[-5:]
+        recent = self.recent_prices[symbol][-5:]
         high_idx = recent.index(max(recent))
         current = recent[-1]
         high = max(recent)
@@ -97,25 +96,32 @@ class MABounceStrategy(BaseStrategy):
         return high_idx in [1, 2, 3] and current < high * 0.999
     
     def on_tick(self, symbol: str, price: float, timestamp: datetime) -> Optional[TradeSignal]:
-        self.ind.add(price)
-        self.ticks_since_signal += 1
+        # Initialize per-symbol state
+        if symbol not in self.indicators:
+            self.indicators[symbol] = Indicators(max_history=250)
+            self.recent_prices[symbol] = []
+        
+        # Check cooldown
+        if symbol in self.last_signal_time:
+            time_since_signal = (timestamp - self.last_signal_time[symbol]).total_seconds() / 60
+            if time_since_signal < self.cooldown_minutes:
+                return None
+        
+        # Add price
+        self.indicators[symbol].add(price)
         
         # Track recent prices
-        self.recent_prices.append(price)
-        if len(self.recent_prices) > 20:
-            self.recent_prices.pop(0)
+        self.recent_prices[symbol].append(price)
+        if len(self.recent_prices[symbol]) > 20:
+            self.recent_prices[symbol].pop(0)
         
         # Need enough data for EMAs
-        if self.ind.count < self.trend_ema + 10:
-            return None
-        
-        # Cooldown
-        if self.ticks_since_signal < self.cooldown_ticks:
+        if self.indicators[symbol].count < self.trend_ema + 10:
             return None
         
         # Calculate EMAs
-        ema_50 = self.ind.ema(self.fast_ema)
-        ema_200 = self.ind.ema(self.trend_ema)
+        ema_50 = self.indicators[symbol].ema(self.fast_ema)
+        ema_200 = self.indicators[symbol].ema(self.trend_ema)
         
         if ema_50 is None or ema_200 is None:
             return None
@@ -130,12 +136,12 @@ class MABounceStrategy(BaseStrategy):
             self.touch_price = price
         
         # Long setup: uptrend + touched EMA + bullish rejection
-        if uptrend and self.touched_ema and self._is_bullish_rejection():
-            self.ticks_since_signal = 0
+        if uptrend and self.touched_ema and self._is_bullish_rejection(symbol):
+            self.last_signal_time[symbol] = timestamp
             self.touched_ema = False
             
             # Stop below recent low
-            recent_low = min(self.recent_prices[-10:])
+            recent_low = min(self.recent_prices[symbol][-10:])
             stop_loss = recent_low * 0.998
             risk = price - stop_loss
             take_profit = price + (risk * self.risk_reward)
@@ -151,12 +157,12 @@ class MABounceStrategy(BaseStrategy):
             )
         
         # Short setup: downtrend + touched EMA + bearish rejection
-        if downtrend and self.touched_ema and self._is_bearish_rejection():
-            self.ticks_since_signal = 0
+        if downtrend and self.touched_ema and self._is_bearish_rejection(symbol):
+            self.last_signal_time[symbol] = timestamp
             self.touched_ema = False
             
             # Stop above recent high
-            recent_high = max(self.recent_prices[-10:])
+            recent_high = max(self.recent_prices[symbol][-10:])
             stop_loss = recent_high * 1.002
             risk = stop_loss - price
             take_profit = price - (risk * self.risk_reward)

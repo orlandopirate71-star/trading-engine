@@ -35,8 +35,10 @@ class RSIMACDStrategy(BaseStrategy):
     def __init__(self, params: dict = None):
         super().__init__(params)
         
-        # Indicator calculator
-        self.ind = Indicators(max_history=200)
+        # Per-symbol state
+        self.indicators = {}
+        self.last_signal_time = {}
+        self.prev_macd_hist = {}
         
         # Parameters
         self.rsi_period = self.params.get("rsi_period", 14)
@@ -50,37 +52,39 @@ class RSIMACDStrategy(BaseStrategy):
         self.take_profit_pct = self.params.get("take_profit_pct", 0.04)
         
         # Cooldown
-        self.cooldown_ticks = self.params.get("cooldown_ticks", 100)
-        self.ticks_since_signal = self.cooldown_ticks
-        
-        # Track previous values for crossover detection
-        self.prev_macd_hist = None
+        self.cooldown_minutes = self.params.get("cooldown_minutes", 3)
     
     def on_tick(self, symbol: str, price: float, timestamp: datetime) -> Optional[TradeSignal]:
+        # Initialize per-symbol state
+        if symbol not in self.indicators:
+            self.indicators[symbol] = Indicators(max_history=200)
+            self.prev_macd_hist[symbol] = None
+        
+        # Check cooldown
+        if symbol in self.last_signal_time:
+            time_since_signal = (timestamp - self.last_signal_time[symbol]).total_seconds() / 60
+            if time_since_signal < self.cooldown_minutes:
+                return None
+        
         # Add price to indicator calculator
-        self.ind.add(price)
-        self.ticks_since_signal += 1
+        self.indicators[symbol].add(price)
         
         # Need enough data
-        if self.ind.count < 50:
-            return None
-        
-        # Cooldown
-        if self.ticks_since_signal < self.cooldown_ticks:
+        if self.indicators[symbol].count < 50:
             return None
         
         # Calculate indicators
-        rsi = self.ind.rsi(self.rsi_period)
-        macd_line, signal_line, macd_hist = self.ind.macd()
-        upper_bb, middle_bb, lower_bb = self.ind.bollinger_bands(self.bb_period, self.bb_std)
+        rsi = self.indicators[symbol].rsi(self.rsi_period)
+        macd_line, signal_line, macd_hist = self.indicators[symbol].macd()
+        upper_bb, middle_bb, lower_bb = self.indicators[symbol].bollinger_bands(self.bb_period, self.bb_std)
         
         if None in (rsi, macd_hist, upper_bb):
             return None
         
         # Track MACD histogram direction
-        macd_turning_up = self.prev_macd_hist is not None and self.prev_macd_hist < 0 and macd_hist > self.prev_macd_hist
-        macd_turning_down = self.prev_macd_hist is not None and self.prev_macd_hist > 0 and macd_hist < self.prev_macd_hist
-        self.prev_macd_hist = macd_hist
+        macd_turning_up = self.prev_macd_hist[symbol] is not None and self.prev_macd_hist[symbol] < 0 and macd_hist > self.prev_macd_hist[symbol]
+        macd_turning_down = self.prev_macd_hist[symbol] is not None and self.prev_macd_hist[symbol] > 0 and macd_hist < self.prev_macd_hist[symbol]
+        self.prev_macd_hist[symbol] = macd_hist
         
         # Calculate distance from Bollinger Bands
         bb_range = upper_bb - lower_bb
@@ -89,7 +93,7 @@ class RSIMACDStrategy(BaseStrategy):
         
         # Long signal: RSI oversold + MACD turning up + near lower BB
         if rsi < self.rsi_oversold and macd_turning_up and dist_from_lower < 0.3:
-            self.ticks_since_signal = 0
+            self.last_signal_time[symbol] = timestamp
             confidence = 0.5 + (self.rsi_oversold - rsi) / 100 + (0.3 - dist_from_lower)
             
             return self.create_signal(
@@ -104,7 +108,7 @@ class RSIMACDStrategy(BaseStrategy):
         
         # Short signal: RSI overbought + MACD turning down + near upper BB
         if rsi > self.rsi_overbought and macd_turning_down and dist_from_upper < 0.3:
-            self.ticks_since_signal = 0
+            self.last_signal_time[symbol] = timestamp
             confidence = 0.5 + (rsi - self.rsi_overbought) / 100 + (0.3 - dist_from_upper)
             
             return self.create_signal(

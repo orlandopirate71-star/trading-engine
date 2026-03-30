@@ -40,7 +40,13 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
     def __init__(self, params: dict = None):
         super().__init__(params)
         
-        self.ind = Indicators(max_history=200)
+        # Per-symbol state
+        self.indicators = {}
+        self.last_signal_time = {}
+        self.price_history = {}
+        self.rsi_history = {}
+        self.recent_highs = {}
+        self.recent_lows = {}
         
         # RSI settings
         self.rsi_period = self.params.get("rsi_period", 14)
@@ -52,16 +58,7 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
         self.risk_reward = self.params.get("risk_reward", 2.0)
         
         # Cooldown
-        self.cooldown_ticks = self.params.get("cooldown_ticks", 200)
-        self.ticks_since_signal = self.cooldown_ticks
-        
-        # Track price and RSI swings
-        self.price_history: List[float] = []
-        self.rsi_history: List[float] = []
-        
-        # Pin bar detection
-        self.recent_highs: List[float] = []
-        self.recent_lows: List[float] = []
+        self.cooldown_minutes = self.params.get("cooldown_minutes", 5)
     
     def _find_swing_lows(self, data: List[float], count: int = 2) -> List[Tuple[int, float]]:
         """Find recent swing lows in data."""
@@ -79,13 +76,13 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
                 swings.append((i, data[i]))
         return swings[-count:] if len(swings) >= count else []
     
-    def _is_bullish_divergence(self) -> bool:
+    def _is_bullish_divergence(self, symbol: str) -> bool:
         """Check for bullish divergence: price lower low, RSI higher low."""
-        if len(self.price_history) < self.divergence_lookback:
+        if len(self.price_history[symbol]) < self.divergence_lookback:
             return False
         
-        price_swings = self._find_swing_lows(self.price_history[-self.divergence_lookback:])
-        rsi_swings = self._find_swing_lows(self.rsi_history[-self.divergence_lookback:])
+        price_swings = self._find_swing_lows(self.price_history[symbol][-self.divergence_lookback:])
+        rsi_swings = self._find_swing_lows(self.rsi_history[symbol][-self.divergence_lookback:])
         
         if len(price_swings) < 2 or len(rsi_swings) < 2:
             return False
@@ -97,13 +94,13 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
         
         return price_lower_low and rsi_higher_low
     
-    def _is_bearish_divergence(self) -> bool:
+    def _is_bearish_divergence(self, symbol: str) -> bool:
         """Check for bearish divergence: price higher high, RSI lower high."""
-        if len(self.price_history) < self.divergence_lookback:
+        if len(self.price_history[symbol]) < self.divergence_lookback:
             return False
         
-        price_swings = self._find_swing_highs(self.price_history[-self.divergence_lookback:])
-        rsi_swings = self._find_swing_highs(self.rsi_history[-self.divergence_lookback:])
+        price_swings = self._find_swing_highs(self.price_history[symbol][-self.divergence_lookback:])
+        rsi_swings = self._find_swing_highs(self.rsi_history[symbol][-self.divergence_lookback:])
         
         if len(price_swings) < 2 or len(rsi_swings) < 2:
             return False
@@ -115,15 +112,15 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
         
         return price_higher_high and rsi_lower_high
     
-    def _is_bullish_pin_bar(self) -> bool:
+    def _is_bullish_pin_bar(self, symbol: str) -> bool:
         """Check for bullish rejection candle (long lower wick)."""
-        if len(self.recent_highs) < 3 or len(self.recent_lows) < 3:
+        if len(self.recent_highs[symbol]) < 3 or len(self.recent_lows[symbol]) < 3:
             return False
         
-        high = self.recent_highs[-1]
-        low = self.recent_lows[-1]
-        close = self.price_history[-1]
-        open_price = self.price_history[-2] if len(self.price_history) > 1 else close
+        high = self.recent_highs[symbol][-1]
+        low = self.recent_lows[symbol][-1]
+        close = self.price_history[symbol][-1]
+        open_price = self.price_history[symbol][-2] if len(self.price_history[symbol]) > 1 else close
         
         body = abs(close - open_price)
         total_range = high - low
@@ -135,15 +132,15 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
         # Lower wick should be > 60% of total range, body < 30%
         return lower_wick / total_range > 0.6 and body / total_range < 0.3
     
-    def _is_bearish_pin_bar(self) -> bool:
+    def _is_bearish_pin_bar(self, symbol: str) -> bool:
         """Check for bearish rejection candle (long upper wick)."""
-        if len(self.recent_highs) < 3 or len(self.recent_lows) < 3:
+        if len(self.recent_highs[symbol]) < 3 or len(self.recent_lows[symbol]) < 3:
             return False
         
-        high = self.recent_highs[-1]
-        low = self.recent_lows[-1]
-        close = self.price_history[-1]
-        open_price = self.price_history[-2] if len(self.price_history) > 1 else close
+        high = self.recent_highs[symbol][-1]
+        low = self.recent_lows[symbol][-1]
+        close = self.price_history[symbol][-1]
+        open_price = self.price_history[symbol][-2] if len(self.price_history[symbol]) > 1 else close
         
         body = abs(close - open_price)
         total_range = high - low
@@ -156,48 +153,58 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
         return upper_wick / total_range > 0.6 and body / total_range < 0.3
     
     def on_tick(self, symbol: str, price: float, timestamp: datetime) -> Optional[TradeSignal]:
-        self.ind.add(price)
-        self.ticks_since_signal += 1
+        # Initialize per-symbol state
+        if symbol not in self.indicators:
+            self.indicators[symbol] = Indicators(max_history=200)
+            self.price_history[symbol] = []
+            self.rsi_history[symbol] = []
+            self.recent_highs[symbol] = []
+            self.recent_lows[symbol] = []
+        
+        # Check cooldown
+        if symbol in self.last_signal_time:
+            time_since_signal = (timestamp - self.last_signal_time[symbol]).total_seconds() / 60
+            if time_since_signal < self.cooldown_minutes:
+                return None
+        
+        # Add price
+        self.indicators[symbol].add(price)
         
         # Track history
-        self.price_history.append(price)
-        if len(self.price_history) > 200:
-            self.price_history.pop(0)
+        self.price_history[symbol].append(price)
+        if len(self.price_history[symbol]) > 200:
+            self.price_history[symbol].pop(0)
         
         # Track highs/lows for pin bar detection
-        self.recent_highs.append(price)
-        self.recent_lows.append(price)
-        if len(self.recent_highs) > 10:
-            self.recent_highs.pop(0)
-            self.recent_lows.pop(0)
+        self.recent_highs[symbol].append(price)
+        self.recent_lows[symbol].append(price)
+        if len(self.recent_highs[symbol]) > 10:
+            self.recent_highs[symbol].pop(0)
+            self.recent_lows[symbol].pop(0)
         
         # Update high/low within current "candle" (last 10 ticks)
-        if len(self.recent_highs) >= 2:
-            self.recent_highs[-1] = max(self.recent_highs[-1], price)
-            self.recent_lows[-1] = min(self.recent_lows[-1], price)
+        if len(self.recent_highs[symbol]) >= 2:
+            self.recent_highs[symbol][-1] = max(self.recent_highs[symbol][-1], price)
+            self.recent_lows[symbol][-1] = min(self.recent_lows[symbol][-1], price)
         
         # Calculate RSI
-        rsi = self.ind.rsi(self.rsi_period)
+        rsi = self.indicators[symbol].rsi(self.rsi_period)
         if rsi is None:
             return None
         
-        self.rsi_history.append(rsi)
-        if len(self.rsi_history) > 200:
-            self.rsi_history.pop(0)
+        self.rsi_history[symbol].append(rsi)
+        if len(self.rsi_history[symbol]) > 200:
+            self.rsi_history[symbol].pop(0)
         
         # Need enough data
-        if len(self.price_history) < self.divergence_lookback:
-            return None
-        
-        # Cooldown
-        if self.ticks_since_signal < self.cooldown_ticks:
+        if len(self.price_history[symbol]) < self.divergence_lookback:
             return None
         
         # Check for bullish divergence + pin bar
-        if self._is_bullish_divergence() and rsi < 40:
-            self.ticks_since_signal = 0
+        if self._is_bullish_divergence(symbol) and rsi < 40:
+            self.last_signal_time[symbol] = timestamp
             
-            recent_low = min(self.price_history[-10:])
+            recent_low = min(self.price_history[symbol][-10:])
             stop_loss = recent_low * 0.998  # Just below recent low
             risk = price - stop_loss
             take_profit = price + (risk * self.risk_reward)
@@ -213,10 +220,10 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
             )
         
         # Check for bearish divergence + pin bar
-        if self._is_bearish_divergence() and rsi > 60:
-            self.ticks_since_signal = 0
+        if self._is_bearish_divergence(symbol) and rsi > 60:
+            self.last_signal_time[symbol] = timestamp
             
-            recent_high = max(self.price_history[-10:])
+            recent_high = max(self.price_history[symbol][-10:])
             stop_loss = recent_high * 1.002  # Just above recent high
             risk = stop_loss - price
             take_profit = price - (risk * self.risk_reward)

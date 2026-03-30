@@ -162,16 +162,25 @@ class PositionMonitor:
         """Main monitoring loop."""
         from datetime import datetime
         def is_market_open():
+            """Check if forex market is currently open (24/5 - Sunday 22:00 UTC to Friday 22:00 UTC)."""
             now = datetime.utcnow()
             utc_hour = now.hour
-            utc_day = now.weekday()
-            if utc_day == 6:
+            utc_day = now.weekday()  # 0=Monday, 1=Tuesday, ..., 5=Saturday, 6=Sunday
+            
+            # Saturday (5) - market closed all day
+            if utc_day == 5:
                 return False
-            if utc_day == 0 and utc_hour < 22:
+            
+            # Sunday (6) before 22:00 UTC - market closed
+            if utc_day == 6 and utc_hour < 22:
                 return False
-            if utc_hour >= 22 or utc_hour < 6:
-                return True
-            return False
+            
+            # Friday (4) after 22:00 UTC - market closed for weekend
+            if utc_day == 4 and utc_hour >= 22:
+                return False
+            
+            # All other times - market is open (24/5)
+            return True
 
         while self._monitoring:
             try:
@@ -252,14 +261,28 @@ class PositionMonitor:
             except KeyError:
                 action = PositionAction.HOLD
 
+            # Parse optional float fields safely with error handling
+            def safe_float(value, default=None):
+                if value is None:
+                    return default
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return default
+            
+            new_sl = safe_float(data.get("new_stop_loss"))
+            new_tp = safe_float(data.get("new_take_profit"))
+            confidence = safe_float(data.get("confidence"), 0.5)
+            close_pct = safe_float(data.get("close_percentage"), 0.0)
+            
             return MonitorResult(
                 action=action,
-                confidence=float(data.get("confidence", 0.5)),
+                confidence=confidence,
                 reasoning=str(data.get("reasoning", "")),
                 urgency=data.get("urgency", "low"),
-                new_stop_loss=data.get("new_stop_loss"),
-                new_take_profit=data.get("new_take_profit"),
-                close_percentage=float(data.get("close_percentage", 0.0)),
+                new_stop_loss=new_sl,
+                new_take_profit=new_tp,
+                close_percentage=close_pct,
                 warnings=data.get("warnings", []),
                 latency_ms=response.latency_ms,
                 provider=response.provider.value
