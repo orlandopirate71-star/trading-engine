@@ -102,16 +102,19 @@ class AITradeValidator:
         loader = get_strategy_loader()
         strategy_source = loader.get_strategy_source(signal.strategy_name) or ""
 
-        # Get recent candles from database for AI analysis
+        # Get recent candles from database for AI analysis (multiple timeframes)
         try:
             from candle_store import get_candle_store
             candle_store = get_candle_store()
-            recent_candles = candle_store.get_recent_candles(signal.symbol, "M5", count=20)
-            if not recent_candles:
-                recent_candles = candle_store.get_recent_candles(signal.symbol, "H1", count=10)
+            candles_by_timeframe = {}
+            for tf in ["M15", "M30", "H1", "H4"]:
+                candles_by_timeframe[tf] = candle_store.get_recent_candles(signal.symbol, tf, count=20)
+            # Fallback to M5 if needed
+            if not candles_by_timeframe.get("M15"):
+                candles_by_timeframe["M5"] = candle_store.get_recent_candles(signal.symbol, "M5", count=20)
         except Exception as e:
             print(f"[AI Validator] Failed to get candles: {e}")
-            recent_candles = []
+            candles_by_timeframe = {}
 
         # Get 24h market info from OANDA
         market_info = None
@@ -149,7 +152,7 @@ class AITradeValidator:
                 signal_data=signal_data,
                 strategy_name=signal.strategy_name,
                 strategy_code=strategy_source,
-                recent_candles=recent_candles,
+                candles_by_timeframe=candles_by_timeframe,
                 market_context=market_context.get("current_price") if market_context else None,
                 market_info=market_info
             )

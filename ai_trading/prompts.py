@@ -39,7 +39,7 @@ def signal_validation_prompt(
     strategy_context: str,
     signal_data: dict,
     market_context: str,
-    recent_candles: list,
+    candles_by_timeframe: dict = None,
     market_info: dict = None
 ) -> str:
     """
@@ -51,12 +51,13 @@ def signal_validation_prompt(
         strategy_context: Brain context for the strategy
         signal_data: Dict with symbol, direction, entry_price, sl, tp, etc.
         market_context: Current market conditions
-        recent_candles: Recent candle data for technical analysis
+        candles_by_timeframe: Dict of {timeframe: [candles]} for multi-TF analysis
         market_info: Optional dict with 24h_high, 24h_low, daily_change, current_price
 
     Returns:
         Formatted prompt string
     """
+    candles_by_timeframe = candles_by_timeframe or {}
     direction = signal_data.get("direction", "UNKNOWN")
     symbol = signal_data.get("symbol", "UNKNOWN")
     entry = signal_data.get("entry_price", 0)
@@ -92,7 +93,12 @@ def signal_validation_prompt(
 - **Current Price:** {market_info.get('current_price', entry)}
 """
 
-    candles_text = _format_candles(recent_candles)
+    # Format candles for each timeframe
+    candles_text = ""
+    for tf, candles in sorted(candles_by_timeframe.items()):
+        if candles:
+            candles_text += f"\n## {tf} CANDLES ({len(candles)} bars)\n"
+            candles_text += _format_candles(candles)
 
     return f"""## SIGNAL TO VALIDATE
 
@@ -121,7 +127,6 @@ def signal_validation_prompt(
 ## MARKET CONTEXT
 {market_context}
 
-## RECENT CANDLES (Latest First)
 {candles_text}
 
 ## VALIDATION CHECKLIST

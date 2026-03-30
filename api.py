@@ -179,9 +179,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/api/prices")
 def get_all_prices():
-    """Get all latest prices from all feeds."""
+    """Get all latest prices from all feeds, filtered to feed_config symbols only."""
+    active_symbols = set(get_active_symbols())
     prices = redis_client.hgetall("latest_prices")
-    return {symbol: float(price) for symbol, price in prices.items()}
+    return {symbol: float(price) for symbol, price in prices.items() if symbol in active_symbols}
 
 
 @app.get("/api/feeds")

@@ -78,7 +78,7 @@ class SignalValidator:
         signal_data: dict,
         strategy_name: str,
         strategy_code: str,
-        recent_candles: Optional[List[dict]] = None,
+        candles_by_timeframe: dict = None,
         market_context: Optional[str] = None,
         market_info: Optional[dict] = None
     ) -> ValidationResult:
@@ -89,7 +89,7 @@ class SignalValidator:
             signal_data: Dict with symbol, direction, entry_price, sl, tp, etc.
             strategy_name: Name of the strategy generating the signal
             strategy_code: Python code of the strategy
-            recent_candles: Recent candle data for technical analysis
+            candles_by_timeframe: Dict of {timeframe: [candles]} for multi-TF analysis
             market_context: Optional pre-fetched market context
             market_info: Optional dict with h24_high, h24_low, daily_change
 
@@ -113,7 +113,7 @@ class SignalValidator:
             strategy_context=strategy_context,
             signal_data=signal_data,
             market_context=market_context,
-            recent_candles=recent_candles or [],
+            candles_by_timeframe=candles_by_timeframe or {},
             market_info=market_info
         )
 

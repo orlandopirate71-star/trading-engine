@@ -16,7 +16,7 @@ const LogViewer = ({ logName, title }) => {
   const fetchLog = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/logs/${logName}?lines=200`)
+      const res = await fetch(`/api/logs/${logName}?lines=1000`)
       const data = await res.json()
       if (data.error) {
         setError(data.error)
@@ -82,7 +82,7 @@ const LogViewer = ({ logName, title }) => {
         </div>
       </div>
 
-      <div className="h-64 overflow-auto">
+      <div className="h-96 overflow-auto">
         {loading && lines.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="animate-pulse text-gray-500">Loading...</div>

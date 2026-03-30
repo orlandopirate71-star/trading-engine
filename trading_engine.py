@@ -113,7 +113,7 @@ class TradingEngine:
         
         # Candle aggregator for time-based OHLC
         self.candle_aggregator = get_candle_aggregator(
-            timeframes=[Timeframe.M1, Timeframe.M5, Timeframe.M15, Timeframe.H1]
+            timeframes=[Timeframe.M1, Timeframe.M5, Timeframe.M15, Timeframe.M30, Timeframe.H1, Timeframe.H4]
         )
         self.candle_aggregator.on_candle_close = self._on_candle_close
 
@@ -1012,7 +1012,8 @@ class TradingEngine:
             "open_positions": len(self.executor.get_open_positions()),
             "pending_trades": len(self.pending_trades),
             "balance": self.executor.get_balance(),
-            "last_prices": self.last_prices
+            "last_prices": self.last_prices,
+            "market_open": is_market_open()
         }
     
     def set_auto_trade(self, enabled: bool):

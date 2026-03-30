@@ -26,23 +26,6 @@ const getTradingSession = () => {
   return { name: 'Closed', color: 'bg-gray-500', textColor: 'text-gray-400' }
 }
 
-const isMarketOpen = () => {
-  const now = new Date()
-  const utcHour = now.getUTCHours()
-  const dayOfWeek = now.getUTCDay() // 0 = Sunday, 6 = Saturday
-
-  // Forex is closed on weekends (Sat/Sun full day, and some brokers Sun evening)
-  if (dayOfWeek === 0) return { open: false, label: 'Market Closed', subtext: 'Opens Sunday 22:00 UTC' }
-  if (dayOfWeek === 6) return { open: false, label: 'Market Closed', subtext: 'Opens Sunday 22:00 UTC' }
-
-  // Weekdays: market open 24h (but real activity 22:00-22:00 UTC)
-  // Show as "open" during active trading hours
-  if (utcHour >= 22 || utcHour < 6) {
-    return { open: true, label: 'Market Open', subtext: 'Sydney/Asian Session' }
-  }
-  return { open: true, label: 'Market Open', subtext: 'London/New York Session' }
-}
-
 const StatCard = ({ title, value, icon: Icon, color, subtext }) => (
   <div className="bg-gray-800 rounded-xl p-3 border border-gray-700">
     <div className="flex items-center justify-between mb-1">
@@ -204,7 +187,7 @@ export default function Dashboard({ status }) {
   const stats = performance?.stats || {}
 
   const session = getTradingSession()
-  const market = isMarketOpen()
+  const marketOpen = status?.market_open !== undefined ? status.market_open : true
 
   const today = new Date()
   const dateStr = today.toLocaleDateString('en-US', {
@@ -219,7 +202,7 @@ export default function Dashboard({ status }) {
       <SystemStatus />
 
       {/* Market Status Banner */}
-      {!market.open && (
+      {!marketOpen && (
         <div className="bg-gray-800/50 border border-gray-700 rounded p-3 flex items-center justify-between text-xs">
           <div className="flex items-center gap-3">
             <Moon size={16} className="text-gray-400" />
@@ -242,9 +225,8 @@ export default function Dashboard({ status }) {
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${market.open ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-            <span className="text-xs text-gray-400">{market.label}</span>
-            <span className="text-xs text-gray-500">({market.subtext})</span>
+            <div className={`w-2 h-2 rounded-full ${marketOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-xs text-gray-400">{marketOpen ? 'Market Open' : 'Market Closed'}</span>
           </div>
           <div className="flex items-center gap-2">
             <Globe size={14} className={session.textColor} />

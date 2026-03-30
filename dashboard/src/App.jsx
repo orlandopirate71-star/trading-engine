@@ -66,6 +66,7 @@ function App() {
       const res = await fetch('/api/status')
       const data = await res.json()
       setStatus(data)
+      setMarketOpen(data.market_open !== false)
     } catch (err) {
       console.error('Failed to fetch status:', err)
     }
@@ -123,27 +124,6 @@ function App() {
       console.error('Failed to save symbol units:', err)
     }
   }
-
-  const checkMarketOpen = () => {
-    const now = new Date()
-    const utcHour = now.getUTCHours()
-    const utcDay = now.getUTCDay()
-    // 0 = Sunday, 6 = Saturday - markets closed on weekends
-    if (utcDay === 0 || utcDay === 6) {
-      setMarketOpen(false)
-      return
-    }
-    // Forex is 24hr but active trading is 22:00-22:00 UTC
-    // Show as closed during low activity hours (6:00-22:00 UTC)
-    const isActiveHours = utcHour >= 22 || utcHour < 6
-    setMarketOpen(isActiveHours)
-  }
-
-  useEffect(() => {
-    checkMarketOpen()
-    const marketCheck = setInterval(checkMarketOpen, 60000) // Check every minute
-    return () => clearInterval(marketCheck)
-  }, [])
 
   useEffect(() => {
     fetchStatus()

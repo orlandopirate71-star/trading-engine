@@ -50,7 +50,7 @@ class CandleStore:
         self._lock = threading.Lock()
         self._enabled = True
 
-    def on_candle_close(self, candle):
+    def on_candle_close(self, candle, history=None):
         """Callback from candle_aggregator when a candle closes."""
         if not self._enabled:
             return
