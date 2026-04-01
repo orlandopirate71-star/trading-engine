@@ -77,14 +77,40 @@ class OandaBroker(BrokerAPI):
 
     def _get_price_precision(self, symbol: str) -> int:
         """Get the decimal precision for an instrument's price."""
-        # OANDA price precisions: forex=5, metals=3, indices=2
-        if symbol.startswith("XAU") or symbol.startswith("XAG"):
-            return 3  # Metals have 3 decimal places
-        if symbol.startswith("US500") or symbol.startswith("US30") or symbol.startswith("US100"):
-            return 2  # Indices have 2 decimal places
-        if symbol.startswith("BTC"):
-            return 1  # Crypto has 1 decimal place
-        return 5  # Forex has 5 decimal places
+        # OANDA price precisions by instrument type:
+        # - Standard forex pairs: 5 decimals (EURUSD, GBPUSD, etc.)
+        # - JPY pairs: 3 decimals (USDJPY, GBPJPY, EURJPY, etc.)
+        # - HUF pairs: 3 decimals (USDHUF, EURHUF)
+        # - Metals: Gold=3, Silver=2
+        # - Indices: 2 decimals
+        # - Crypto: 1 decimal
+        
+        # Metals
+        if symbol.startswith("XAU"):
+            return 3  # Gold
+        if symbol.startswith("XAG"):
+            return 2  # Silver
+            
+        # Indices (major global indices)
+        if symbol.startswith(("US500", "US30", "US100", "NAS100", "SPX500", 
+                            "UK100", "GER40", "FRA40", "ESP35", "ITA40",
+                            "AUS200", "JPN225", "HK50", "CHN50")):
+            return 2
+            
+        # Crypto
+        if symbol.startswith(("BTC", "ETH", "LTC", "XRP", "BCH")):
+            return 1
+            
+        # JPY pairs (any pair containing JPY)
+        if "JPY" in symbol:
+            return 3
+            
+        # HUF pairs (Hungarian Forint typically has 3 decimals)
+        if "HUF" in symbol:
+            return 3
+            
+        # Default: Standard forex pairs (EURUSD, GBPUSD, etc.)
+        return 5
 
     def _round_price(self, price: float, symbol: str) -> float:
         """Round price to OANDA's required precision."""
@@ -113,13 +139,15 @@ class OandaBroker(BrokerAPI):
         
         # Convert lots to base currency units
         # For forex: 1 lot = 100,000 units, 0.1 lots = 10,000 units
-        # For metals (XAUUSD): 1 lot = 1 troy ounce
+        # For metals (XAUUSD): 1 unit = 1 troy ounce
         if symbol.startswith("XAU") or symbol.startswith("XAG"):
-            # Metals: use quantity as-is (1 unit = 1 troy ounce)
-            base_units = int(quantity * 1)
+            # Metals: quantity is in lots, but OANDA uses units directly
+            # For metals, 1 lot typically = 100 units (not 100,000)
+            # Ensure minimum 1 unit
+            base_units = max(1, int(quantity * 100))
         else:
             # Forex: convert lots to units (1 lot = 100,000 units)
-            base_units = int(quantity * 100000)
+            base_units = max(1, int(quantity * 100000))
         
         # OANDA uses positive units for buy, negative for sell
         units = base_units if side.upper() == "BUY" else -base_units
@@ -588,24 +616,32 @@ class OandaBroker(BrokerAPI):
 
     def modify_trade(self, trade_id: str, stop_loss: float = None, take_profit: float = None) -> OrderResult:
         """
-        Modify stop loss and/or take profit on an open trade via OANDA's trade modify endpoint.
+        Modify stop loss and/or take profit on an open trade via OANDA's orders endpoint.
+        OANDA doesn't support direct trade modification - use the /trades/{id}/orders endpoint
+        which cancels existing SL/TP orders and creates new ones.
         """
         modify_data = {}
 
         if stop_loss is not None:
             precision = self._get_price_precision_for_instrument(trade_id)
-            modify_data["stopLoss"] = {"price": f"{stop_loss:.{precision}f}"}
+            modify_data["stopLoss"] = {
+                "timeInForce": "GTC",
+                "price": f"{stop_loss:.{precision}f}"
+            }
 
         if take_profit is not None:
             precision = self._get_price_precision_for_instrument(trade_id)
-            modify_data["takeProfit"] = {"price": f"{take_profit:.{precision}f}"}
+            modify_data["takeProfit"] = {
+                "timeInForce": "GTC",
+                "price": f"{take_profit:.{precision}f}"
+            }
 
         if not modify_data:
             return OrderResult(success=False, error="No changes specified")
 
         try:
             response = requests.put(
-                f"{self.api_url}/v3/accounts/{self.account_id}/trades/{trade_id}/modify",
+                f"{self.api_url}/v3/accounts/{self.account_id}/trades/{trade_id}/orders",
                 headers=self.headers,
                 json=modify_data,
                 timeout=10
@@ -613,12 +649,14 @@ class OandaBroker(BrokerAPI):
 
             if response.status_code == 200:
                 data = response.json()
-                trade = data.get("trade", {})
+                # Get the new order details from the response
+                sl_order = data.get("stopLossOrderTransaction", {})
+                tp_order = data.get("takeProfitOrderTransaction", {})
                 print(f"[OANDA] Modified trade {trade_id}: SL={stop_loss}, TP={take_profit}")
                 return OrderResult(
                     success=True,
-                    order_id=trade.get("id"),
-                    filled_price=float(trade.get("price", 0)),
+                    order_id=sl_order.get("id") or tp_order.get("id", trade_id),
+                    filled_price=float(sl_order.get("price", 0)) if sl_order else 0,
                     timestamp=datetime.utcnow()
                 )
             else:

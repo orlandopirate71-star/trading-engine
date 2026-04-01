@@ -191,6 +191,20 @@ class BreakoutPullbackStrategy(BaseStrategy):
         
         return None
     
+    def _get_atr_multiplier(self, symbol: str, price: float) -> float:
+        """Get ATR multiplier based on instrument type and price scale."""
+        # Metals need larger ATR multipliers due to different price scale
+        if symbol.startswith(("XAU", "XAG", "XPT", "XPD")):
+            return 5.0  # 5x multiplier for metals
+        # JPY pairs have different scale
+        if "JPY" in symbol:
+            return 2.0
+        # Crypto
+        if symbol.startswith(("BTC", "ETH")):
+            return 3.0
+        # Standard forex
+        return 1.0
+
     def on_tick(self, symbol: str, price: float, timestamp: datetime) -> Optional[TradeSignal]:
         # Initialize per-symbol state
         self._get_symbol_state(symbol)
@@ -233,8 +247,12 @@ class BreakoutPullbackStrategy(BaseStrategy):
             self.ticks_since_signal[symbol] = 0
             pullback_level.broken = False  # Reset so we don't trade again
             
-            stop_loss = pullback_level.price - atr
-            take_profit = price + (atr * self.risk_reward)
+            # Scale ATR appropriately for instrument type
+            atr_multiplier = self._get_atr_multiplier(symbol, price)
+            scaled_atr = atr * atr_multiplier
+            
+            stop_loss = pullback_level.price - scaled_atr
+            take_profit = price + (scaled_atr * self.risk_reward)
             
             return self.create_signal(
                 symbol=symbol,
@@ -253,8 +271,12 @@ class BreakoutPullbackStrategy(BaseStrategy):
             self.ticks_since_signal[symbol] = 0
             pullback_level.broken = False
 
-            stop_loss = pullback_level.price + atr
-            take_profit = price - (atr * self.risk_reward)
+            # Scale ATR appropriately for instrument type
+            atr_multiplier = self._get_atr_multiplier(symbol, price)
+            scaled_atr = atr * atr_multiplier
+
+            stop_loss = pullback_level.price + scaled_atr
+            take_profit = price - (scaled_atr * self.risk_reward)
 
             return self.create_signal(
                 symbol=symbol,

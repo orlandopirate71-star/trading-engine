@@ -51,6 +51,14 @@ class AIClient:
         # Track which provider was last used
         self._last_successful: Optional[Provider] = None
         self._using_backup = False
+        
+        # Force mode: "auto", "primary", "backup" - for manual override
+        self._force_ollama_mode: str = "auto"
+        
+        # Monitor AI mode: "cloud" (default/backup), "local" (qwen2.5:14b)
+        self._monitor_ai_mode: str = "cloud"
+        self._monitor_local_model: str = "qwen2.5:14b"
+        self._monitor_local_base: str = "http://192.168.0.35:11434"
 
     def generate(
         self,
@@ -67,34 +75,53 @@ class AIClient:
 
         # Try primary first
         if self.primary == Provider.OLLAMA:
-            try:
-                return self._ollama_generate(
-                    prompt, system, max_tokens, temperature, timeout
-                )
-            except Exception as e:
-                print(f"[AI] Primary Ollama failed: {e}")
-                
-                # Try backup Ollama server if configured
-                if self.ollama_backup_base:
-                    try:
-                        print(f"[AI] Trying backup Ollama server at {self.ollama_backup_base}...")
-                        return self._ollama_generate(
-                            prompt, system, max_tokens, temperature, timeout,
-                            base_override=self.ollama_backup_base,
-                            model_override=self.ollama_backup_model
-                        )
-                    except Exception as backup_e:
-                        print(f"[AI] Backup Ollama failed: {backup_e}")
-                
-                # Try Anthropic as next fallback
-                if self.anthropic_api_key:
-                    print(f"[AI] Trying Anthropic...")
-                    try:
-                        return self._anthropic_generate(
-                            prompt, system, max_tokens, temperature, timeout
-                        )
-                    except Exception as anthropic_e:
-                        print(f"[AI] Anthropic failed: {anthropic_e}")
+            # Check force mode
+            if self._force_ollama_mode == "backup" and self.ollama_backup_base:
+                try:
+                    print(f"[AI] Forced backup Ollama mode")
+                    return self._ollama_generate(
+                        prompt, system, max_tokens, temperature, timeout,
+                        base_override=self.ollama_backup_base,
+                        model_override=self.ollama_backup_model
+                    )
+                except Exception as e:
+                    print(f"[AI] Forced backup failed: {e}")
+                    # Fall through to normal logic if forced backup fails
+            
+            # Try primary if not forced to backup
+            if self._force_ollama_mode != "backup":
+                try:
+                    return self._ollama_generate(
+                        prompt, system, max_tokens, temperature, timeout
+                    )
+                except Exception as e:
+                    print(f"[AI] Primary Ollama failed: {e}")
+                    
+                    # If forced to primary, don't try backup
+                    if self._force_ollama_mode == "primary":
+                        print(f"[AI] Forced primary mode - not trying backup")
+                    else:
+                        # Try backup Ollama server if configured
+                        if self.ollama_backup_base:
+                            try:
+                                print(f"[AI] Trying backup Ollama server at {self.ollama_backup_base}...")
+                                return self._ollama_generate(
+                                    prompt, system, max_tokens, temperature, timeout,
+                                    base_override=self.ollama_backup_base,
+                                    model_override=self.ollama_backup_model
+                                )
+                            except Exception as backup_e:
+                                print(f"[AI] Backup Ollama failed: {backup_e}")
+                    
+                    # Try Anthropic as next fallback (unless forced primary)
+                    if self._force_ollama_mode != "primary" and self.anthropic_api_key:
+                        print(f"[AI] Trying Anthropic...")
+                        try:
+                            return self._anthropic_generate(
+                                prompt, system, max_tokens, temperature, timeout
+                            )
+                        except Exception as anthropic_e:
+                            print(f"[AI] Anthropic failed: {anthropic_e}")
 
         # Try Anthropic as fallback
         if self.primary == Provider.ANTHROPIC and self.anthropic_api_key:
@@ -266,6 +293,67 @@ class AIClient:
                 pass
 
         return None
+
+
+    def set_force_ollama_mode(self, mode: str):
+        """Set Ollama mode: 'auto', 'primary', or 'backup'."""
+        if mode not in ("auto", "primary", "backup"):
+            raise ValueError("Mode must be 'auto', 'primary', or 'backup'")
+        self._force_ollama_mode = mode
+        print(f"[AI] Ollama mode set to: {mode}")
+
+    def get_force_ollama_mode(self) -> str:
+        """Get current forced Ollama mode."""
+        return self._force_ollama_mode
+
+    def get_current_ollama_status(self) -> dict:
+        """Get current Ollama status info."""
+        return {
+            "mode": self._force_ollama_mode,
+            "using_backup": self._using_backup,
+            "primary_base": self.ollama_base,
+            "backup_base": self.ollama_backup_base,
+            "last_successful": self._last_successful.value if self._last_successful else None
+        }
+
+    def set_monitor_ai_mode(self, mode: str):
+        """Set monitor AI mode: 'cloud' (default/backup) or 'local' (qwen2.5:14b)."""
+        if mode not in ("cloud", "local"):
+            raise ValueError("Mode must be 'cloud' or 'local'")
+        self._monitor_ai_mode = mode
+        print(f"[AI] Monitor AI mode set to: {mode}")
+
+    def get_monitor_ai_mode(self) -> str:
+        """Get current monitor AI mode."""
+        return self._monitor_ai_mode
+
+    def generate_for_monitor(
+        self,
+        prompt: str,
+        system: Optional[str] = None,
+        max_tokens: int = 2048,
+        temperature: float = 0.3,
+        timeout: float = 120.0
+    ) -> AIResponse:
+        """
+        Generate a response specifically for position monitoring.
+        Uses local qwen2.5:14b when in local mode, otherwise uses normal flow.
+        """
+        if self._monitor_ai_mode == "local":
+            # Use local qwen2.5:14b for monitoring
+            try:
+                print(f"[AI Monitor] Using local {self._monitor_local_model}")
+                return self._ollama_generate(
+                    prompt, system, max_tokens, temperature, timeout,
+                    base_override=self._monitor_local_base,
+                    model_override=self._monitor_local_model
+                )
+            except Exception as e:
+                print(f"[AI Monitor] Local model failed: {e}, falling back to cloud")
+                # Fall through to normal generate on failure
+        
+        # Use standard flow (cloud with fallback)
+        return self.generate(prompt, system, max_tokens, temperature, timeout)
 
 
 # Singleton instance

@@ -55,8 +55,8 @@ class TradingEngine:
     def __init__(
         self,
         strategies_dir: str = "strategies",
-        auto_trade: bool = False,
-        require_approval: bool = True
+        auto_trade: bool = True,  # Default to True for automated trading
+        require_approval: bool = False  # Default to False when auto_trade is True
     ):
         self.strategies_dir = strategies_dir
         
@@ -97,11 +97,13 @@ class TradingEngine:
             try:
                 from ai_trading.validators.position_monitor import PositionMonitor
                 self.position_monitor = PositionMonitor(
-                    check_interval=300.0,  # 5 minutes (reduced from 30s to save AI credits)
-                    confidence_threshold=0.7,
-                    enabled=True
+                    check_interval=300.0,  # 5 minutes
+                    confidence_threshold=0.6,  # Lower threshold so AI acts more often
+                    urgency_high_threshold=0.8,
+                    enabled=True,
+                    auto_trade=True  # Execute AI recommendations automatically
                 )
-                print("[ENGINE] AI Position Monitor initialized (5min interval)")
+                print("[ENGINE] AI Position Monitor initialized (5min interval, auto-trade enabled)")
             except Exception as e:
                 print(f"[ENGINE] Position Monitor init error: {e}")
 
@@ -726,8 +728,8 @@ class TradingEngine:
         trade_id = self._save_trade(trade)
         trade.id = trade_id
         
-        if trade.openclaw_approved:
-            print(f"[ENGINE] AI APPROVED: {trade.openclaw_analysis[:100]}...")
+        if trade.ai_approved:
+            print(f"[ENGINE] AI APPROVED: {trade.ai_analysis[:100]}...")
 
             # Capture entry screenshot (returns list of {timeframe, path} dicts)
             screenshot_results = self.screenshot_service.capture_tradingview(
@@ -757,20 +759,23 @@ class TradingEngine:
                         self.pending_trades.append(trade)
                     return
 
-                # Execute the trade based on broker mode
-                if self.broker_mode == "oanda" and self.oanda_broker:
+                # Execute the trade on OANDA
+                if self.oanda_broker:
                     trade = self._execute_oanda_trade(trade, signal)
                 else:
-                    trade = self.executor.execute_trade(trade)
+                    print(f"[ENGINE] OANDA broker not available - trade not executed")
+                    trade.status = TradeStatus.FAILED
+                    self._update_trade(trade)
+                    return
                 self._update_trade(trade)
-                print(f"[ENGINE] Trade executed ({self.broker_mode}): {trade.status}")
+                print(f"[ENGINE] Trade executed on OANDA: {trade.status}")
             else:
                 # Add to pending for manual execution
                 with self._lock:
                     self.pending_trades.append(trade)
                 print(f"[ENGINE] Trade pending manual execution")
         else:
-            print(f"[ENGINE] AI REJECTED: {trade.openclaw_analysis[:100]}...")
+            print(f"[ENGINE] AI REJECTED: {trade.ai_analysis[:100]}...")
             trade.status = TradeStatus.REJECTED
             self._update_trade(trade)
     
@@ -959,8 +964,8 @@ class TradingEngine:
         cur.execute("""
             INSERT INTO trades 
             (signal_id, strategy_name, symbol, direction, status, entry_price, 
-             stop_loss, take_profit, openclaw_approved, openclaw_analysis, 
-             openclaw_confidence, signal_time, approved_time, metadata)
+             stop_loss, take_profit, ai_approved, ai_analysis, 
+             ai_confidence, signal_time, approved_time, metadata)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
@@ -972,9 +977,9 @@ class TradingEngine:
             trade.entry_price,
             trade.stop_loss,
             trade.take_profit,
-            trade.openclaw_approved,
-            trade.openclaw_analysis,
-            trade.openclaw_confidence,
+            trade.ai_approved,
+            trade.ai_analysis,
+            trade.ai_confidence,
             trade.signal_time,
             trade.approved_time,
             json.dumps(trade.metadata)
@@ -1118,8 +1123,8 @@ _engine: Optional[TradingEngine] = None
 
 def get_engine(
     strategies_dir: str = "strategies",
-    auto_trade: bool = False,
-    require_approval: bool = True
+    auto_trade: bool = True,
+    require_approval: bool = False
 ) -> TradingEngine:
     """Get or create the trading engine singleton."""
     global _engine
@@ -1132,7 +1137,7 @@ if __name__ == "__main__":
     import signal
     import sys
     
-    engine = get_engine(auto_trade=False, require_approval=True)
+    engine = get_engine(auto_trade=True, require_approval=False)
     
     def shutdown(sig, frame):
         print("\nShutting down...")

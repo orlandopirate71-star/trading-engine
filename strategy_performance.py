@@ -94,7 +94,7 @@ class StrategyPerformance:
         cur.execute("""
             SELECT 
                 COUNT(*) as total_signals,
-                SUM(CASE WHEN openclaw_approved = true THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN ai_approved = true THEN 1 ELSE 0 END) as approved,
                 AVG(confidence) as avg_confidence
             FROM signals
             WHERE strategy_name = %s
@@ -207,8 +207,8 @@ class StrategyPerformance:
             cur.execute("""
                 SELECT 
                     COUNT(*) as total_signals,
-                    SUM(CASE WHEN openclaw_approved = true THEN 1 ELSE 0 END) as approved,
-                    SUM(CASE WHEN openclaw_approved = false THEN 1 ELSE 0 END) as rejected,
+                    SUM(CASE WHEN ai_approved = true THEN 1 ELSE 0 END) as approved,
+                    SUM(CASE WHEN ai_approved = false THEN 1 ELSE 0 END) as rejected,
                     AVG(confidence) as avg_confidence
                 FROM signals
                 WHERE strategy_name = %s

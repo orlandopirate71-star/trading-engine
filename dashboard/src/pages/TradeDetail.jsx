@@ -340,16 +340,16 @@ export default function TradeDetail() {
               {trade.approved_time && (
                 <div className="flex items-start gap-4">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    trade.openclaw_approved ? 'bg-green-900' : 'bg-red-900'
+                    trade.ai_approved ? 'bg-green-900' : 'bg-red-900'
                   }`}>
-                    {trade.openclaw_approved ? 
+                    {trade.ai_approved ? 
                       <CheckCircle size={18} className="text-green-400" /> :
                       <XCircle size={18} className="text-red-400" />
                     }
                   </div>
                   <div>
                     <div className="font-medium">
-                      AI Validator {trade.openclaw_approved ? 'Approved' : 'Rejected'}
+                      AI Validator {trade.ai_approved ? 'Approved' : 'Rejected'}
                     </div>
                     <div className="text-sm text-gray-400">
                       {format(new Date(trade.approved_time), 'PPpp')}
@@ -437,7 +437,7 @@ export default function TradeDetail() {
         <div className="space-y-6">
           <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              {trade.openclaw_approved ? 
+              {trade.ai_approved ? 
                 <CheckCircle className="text-green-400" /> :
                 <XCircle className="text-red-400" />
               }
@@ -448,9 +448,9 @@ export default function TradeDetail() {
               <div>
                 <div className="text-sm text-gray-400 mb-1">Decision</div>
                 <div className={`text-lg font-bold ${
-                  trade.openclaw_approved ? 'text-green-400' : 'text-red-400'
+                  trade.ai_approved ? 'text-green-400' : 'text-red-400'
                 }`}>
-                  {trade.openclaw_approved ? 'APPROVED' : 'REJECTED'}
+                  {trade.ai_approved ? 'APPROVED' : 'REJECTED'}
                 </div>
               </div>
 
@@ -460,14 +460,14 @@ export default function TradeDetail() {
                   <div className="flex-1 bg-gray-700 rounded-full h-2">
                     <div 
                       className={`h-2 rounded-full ${
-                        trade.openclaw_confidence >= 0.7 ? 'bg-green-500' :
-                        trade.openclaw_confidence >= 0.4 ? 'bg-yellow-500' : 'bg-red-500'
+                        trade.ai_confidence >= 0.7 ? 'bg-green-500' :
+                        trade.ai_confidence >= 0.4 ? 'bg-yellow-500' : 'bg-red-500'
                       }`}
-                      style={{ width: `${(trade.openclaw_confidence || 0) * 100}%` }}
+                      style={{ width: `${(trade.ai_confidence || 0) * 100}%` }}
                     />
                   </div>
                   <span className="font-mono">
-                    {((trade.openclaw_confidence || 0) * 100).toFixed(0)}%
+                    {((trade.ai_confidence || 0) * 100).toFixed(0)}%
                   </span>
                 </div>
               </div>
@@ -475,7 +475,7 @@ export default function TradeDetail() {
               <div>
                 <div className="text-sm text-gray-400 mb-1">Analysis</div>
                 <div className="text-sm bg-gray-900 rounded-lg p-4">
-                  {trade.openclaw_analysis || 'No analysis available'}
+                  {trade.ai_analysis || 'No analysis available'}
                 </div>
               </div>
             </div>

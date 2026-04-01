@@ -9,9 +9,9 @@ import json
 
 
 class TradeStatus(Enum):
-    PENDING = "pending"           # Signal generated, awaiting OpenClaw
-    APPROVED = "approved"         # OpenClaw approved
-    REJECTED = "rejected"         # OpenClaw rejected
+    PENDING = "pending"           # Signal generated, awaiting AI validation
+    APPROVED = "approved"         # AI approved
+    REJECTED = "rejected"         # AI rejected
     EXECUTED = "executed"         # Order placed
     OPEN = "open"                 # Position is open
     CLOSED = "closed"             # Position closed
@@ -71,10 +71,10 @@ class Trade:
     trailing_stop_lock: Optional[float] = None    # Profit ($) to lock in when triggered
     trailing_stop_activated: bool = False         # Whether trailing stop has been activated
 
-    # OpenClaw validation
-    openclaw_approved: bool = False
-    openclaw_analysis: str = ""
-    openclaw_confidence: float = 0.0
+    # AI validation
+    ai_approved: bool = False
+    ai_analysis: str = ""
+    ai_confidence: float = 0.0
     
     # Timestamps
     signal_time: datetime = field(default_factory=datetime.utcnow)
@@ -160,9 +160,9 @@ CREATE TABLE IF NOT EXISTS trades (
     pnl_percent DECIMAL(10, 4),
     fees DECIMAL(20, 8) DEFAULT 0,
     
-    openclaw_approved BOOLEAN DEFAULT FALSE,
-    openclaw_analysis TEXT,
-    openclaw_confidence DECIMAL(5, 4),
+    ai_approved BOOLEAN DEFAULT FALSE,
+    ai_analysis TEXT,
+    ai_confidence DECIMAL(5, 4),
     
     signal_time TIMESTAMPTZ NOT NULL,
     approved_time TIMESTAMPTZ,

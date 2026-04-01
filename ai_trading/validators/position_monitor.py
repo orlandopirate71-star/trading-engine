@@ -14,7 +14,9 @@ from ai_trading.ai_client import get_ai_client, AIClient, AIResponse
 from ai_trading.brain_client import get_brain_client, BrainClient
 from ai_trading.prompts import (
     POSITION_MONITOR_SYSTEM,
+    POSITION_MONITOR_SYSTEM_LOCAL,
     position_monitor_prompt,
+    position_monitor_prompt_local,
     brain_update_prompt
 )
 
@@ -70,9 +72,10 @@ class PositionMonitor:
         ai_client: Optional[AIClient] = None,
         brain_client: Optional[BrainClient] = None,
         check_interval: float = 30.0,  # seconds between checks
-        confidence_threshold: float = 0.7,  # min confidence for actions
-        urgency_high_threshold: float = 0.85,  # confidence for high urgency actions
-        enabled: bool = True
+        confidence_threshold: float = 0.6,  # min confidence for actions (lowered from 0.7)
+        urgency_high_threshold: float = 0.8,  # confidence for high urgency actions
+        enabled: bool = True,
+        auto_trade: bool = True  # Execute AI recommendations automatically
     ):
         """
         Initialize the position monitor.
@@ -84,6 +87,7 @@ class PositionMonitor:
             confidence_threshold: Min confidence for any action
             urgency_high_threshold: Confidence level for high urgency actions
             enabled: Whether monitoring is active
+            auto_trade: If True, execute AI recommendations automatically
         """
         self.ai = ai_client or get_ai_client()
         self.brain = brain_client or get_brain_client()
@@ -91,6 +95,7 @@ class PositionMonitor:
         self.confidence_threshold = confidence_threshold
         self.urgency_high_threshold = urgency_high_threshold
         self.enabled = enabled
+        self.auto_trade = auto_trade
 
         self._monitoring = False
         self._monitor_thread: Optional[threading.Thread] = None
@@ -208,24 +213,66 @@ class PositionMonitor:
         symbol = position.get("symbol", "")
         market_context = self.brain.get_market_context(symbol)
 
-        # Build recent candles - this would come from candle aggregator
-        # For now, placeholder - would integrate with existing candle data
+        # Build recent candles - handle both dict (multi-tf) and list formats
         recent_candles = position.get("recent_candles", [])
 
-        prompt = position_monitor_prompt(
-            position_data=position,
-            market_context=market_context,
-            recent_candles=recent_candles,
-            open_trade_history=all_positions
-        )
+        # If candles come as a dict (multi-timeframe from engine), flatten to list
+        if isinstance(recent_candles, dict):
+            # Combine candles from multiple timeframes, newest first
+            flattened = []
+            for tf_name in ["M5", "M15", "M30", "H1", "H4"]:
+                tf_candles = recent_candles.get(tf_name, [])
+                if tf_candles:
+                    flattened.extend(tf_candles[:5])  # Take up to 5 from each TF
+            recent_candles = flattened[:20]  # Limit to 20 total
+
+        # Check if using local AI mode for monitoring
+        # Get current AIClient to ensure we have latest mode setting
+        from ai_trading.ai_client import get_ai_client
+        current_ai = get_ai_client()
+        using_local = getattr(current_ai, '_monitor_ai_mode', 'cloud') == 'local'
+        
+        # Debug logging
+        mode_value = getattr(current_ai, '_monitor_ai_mode', 'cloud')
+        local_base = getattr(current_ai, '_monitor_local_base', 'N/A')
+        print(f"[PositionMonitor] AI mode check: _monitor_ai_mode={mode_value}, using_local={using_local}, local_base={local_base}")
+        
+        if using_local:
+            # Use optimized local prompts
+            prompt = position_monitor_prompt_local(
+                position_data=position,
+                market_context=market_context,
+                recent_candles=recent_candles
+            )
+            system_prompt = POSITION_MONITOR_SYSTEM_LOCAL
+        else:
+            # Use cloud prompts (original)
+            prompt = position_monitor_prompt(
+                position_data=position,
+                market_context=market_context,
+                recent_candles=recent_candles,
+                open_trade_history=all_positions
+            )
+            system_prompt = POSITION_MONITOR_SYSTEM
 
         try:
-            response = self.ai.generate(
-                prompt=prompt,
-                system=POSITION_MONITOR_SYSTEM,
-                max_tokens=2048,
-                temperature=0.3
-            )
+            if using_local:
+                # Use local model with shorter timeout
+                response = current_ai.generate_for_monitor(
+                    prompt=prompt,
+                    system=system_prompt,
+                    max_tokens=1024,
+                    temperature=0.2,
+                    timeout=60.0
+                )
+            else:
+                # Use standard cloud flow
+                response = current_ai.generate(
+                    prompt=prompt,
+                    system=system_prompt,
+                    max_tokens=2048,
+                    temperature=0.3
+                )
 
             result = self._parse_response(response)
             result.latency_ms = (time.time() - start_time) * 1000
@@ -326,7 +373,9 @@ class PositionMonitor:
             print(f"[PositionMonitor] Failed to update Brain: {e}")
 
     def should_act(self, result: MonitorResult) -> bool:
-        """Check if action should be executed based on thresholds."""
+        """Check if action should be executed based on thresholds and auto_trade setting."""
+        if not self.auto_trade:
+            return False
         if not result or result.confidence < self.confidence_threshold:
             return False
 

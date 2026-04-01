@@ -432,6 +432,208 @@ def get_validator_mode():
     return {"mode": "ai_validator"}
 
 
+@app.get("/api/ai-confidence")
+def get_ai_confidence_threshold():
+    """Get current AI confidence threshold for trade approval."""
+    engine = get_engine()
+    if engine.validator:
+        return {"confidence_threshold": engine.validator.get_confidence_threshold()}
+    return {"confidence_threshold": 0.75}
+
+
+class ConfidenceThresholdRequest(BaseModel):
+    threshold: float
+
+
+@app.post("/api/ai-confidence")
+def set_ai_confidence_threshold(request: ConfidenceThresholdRequest):
+    """Set AI confidence threshold for trade approval (0.0-1.0)."""
+    engine = get_engine()
+    if not engine.validator:
+        raise HTTPException(status_code=500, detail="AI validator not initialized")
+    
+    # Validate range
+    if request.threshold < 0.0 or request.threshold > 1.0:
+        raise HTTPException(status_code=400, detail="Threshold must be between 0.0 and 1.0")
+    
+    engine.validator.set_confidence_threshold(request.threshold)
+    return {"confidence_threshold": request.threshold}
+
+
+@app.get("/api/ai-monitor-confidence")
+def get_ai_monitor_confidence():
+    """Get current AI confidence threshold for position monitoring."""
+    engine = get_engine()
+    if engine.validator:
+        return {"monitor_confidence": engine.validator.get_monitor_confidence_threshold()}
+    return {"monitor_confidence": 0.6}
+
+
+@app.post("/api/ai-monitor-confidence")
+def set_ai_monitor_confidence(request: ConfidenceThresholdRequest):
+    """Set AI confidence threshold for position monitoring (0.0-1.0). Lower = more active."""
+    engine = get_engine()
+    if not engine.validator:
+        raise HTTPException(status_code=500, detail="AI validator not initialized")
+    
+    if request.threshold < 0.0 or request.threshold > 1.0:
+        raise HTTPException(status_code=400, detail="Threshold must be between 0.0 and 1.0")
+    
+    engine.validator.set_monitor_confidence_threshold(request.threshold)
+    return {"monitor_confidence": request.threshold}
+
+
+# === Ollama Mode Control ===
+
+@app.get("/api/ollama-mode")
+def get_ollama_mode():
+    """Get current Ollama mode (auto, primary, backup) and status."""
+    from ai_trading.ai_client import get_ai_client
+    try:
+        client = get_ai_client()
+        status = client.get_current_ollama_status()
+        return status
+    except Exception as e:
+        return {"mode": "auto", "error": str(e)}
+
+
+class OllamaModeRequest(BaseModel):
+    mode: str  # "auto", "primary", "backup"
+
+
+@app.post("/api/ollama-mode")
+def set_ollama_mode(request: OllamaModeRequest):
+    """Set Ollama mode: 'auto' (auto-failover), 'primary' (force localhost), 'backup' (force backup server)."""
+    from ai_trading.ai_client import get_ai_client
+    
+    if request.mode not in ("auto", "primary", "backup"):
+        raise HTTPException(status_code=400, detail="Mode must be 'auto', 'primary', or 'backup'")
+    
+    try:
+        client = get_ai_client()
+        client.set_force_ollama_mode(request.mode)
+        return {"mode": request.mode, "using_backup": client._using_backup}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === Monitor AI Mode Control ===
+
+@app.get("/api/monitor-ai-mode")
+def get_monitor_ai_mode():
+    """Get current monitor AI mode (cloud or local)."""
+    from ai_trading.ai_client import get_ai_client
+    try:
+        client = get_ai_client()
+        mode = client.get_monitor_ai_mode()
+        return {
+            "mode": mode,
+            "local_model": client._monitor_local_model,
+            "local_base": client._monitor_local_base
+        }
+    except Exception as e:
+        return {"mode": "cloud", "error": str(e)}
+
+
+class MonitorAIModeRequest(BaseModel):
+    mode: str  # "cloud" or "local"
+
+
+@app.post("/api/monitor-ai-mode")
+def set_monitor_ai_mode(request: MonitorAIModeRequest):
+    """Set monitor AI mode: 'cloud' (default/backup) or 'local' (qwen2.5:14b localhost)."""
+    from ai_trading.ai_client import get_ai_client
+    
+    if request.mode not in ("cloud", "local"):
+        raise HTTPException(status_code=400, detail="Mode must be 'cloud' or 'local'")
+    
+    try:
+        client = get_ai_client()
+        client.set_monitor_ai_mode(request.mode)
+        return {
+            "mode": request.mode,
+            "local_model": client._monitor_local_model,
+            "local_base": client._monitor_local_base
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/monitor-ai-test")
+def test_monitor_ai():
+    """Test the monitor AI connection (local or cloud)."""
+    from ai_trading.ai_client import get_ai_client
+    from ai_trading.prompts import POSITION_MONITOR_SYSTEM_LOCAL, position_monitor_prompt_local
+    import time
+    
+    try:
+        client = get_ai_client()
+        mode = client.get_monitor_ai_mode()
+        
+        # Create a dummy position for testing
+        test_position = {
+            "symbol": "EURUSD",
+            "direction": "LONG",
+            "entry_price": 1.0850,
+            "current_price": 1.0865,
+            "stop_loss": 1.0800,
+            "take_profit": 1.0950,
+            "unrealized_pnl": 150.0
+        }
+        
+        # Create dummy candles
+        test_candles = [
+            {"time": "12:00:00", "open": 1.0850, "high": 1.0860, "low": 1.0845, "close": 1.0855},
+            {"time": "12:05:00", "open": 1.0855, "high": 1.0865, "low": 1.0850, "close": 1.0865},
+        ]
+        
+        market_context = "Test market context - bullish momentum on EURUSD"
+        
+        if mode == "local":
+            # Test local model
+            prompt = position_monitor_prompt_local(test_position, market_context, test_candles)
+            system = POSITION_MONITOR_SYSTEM_LOCAL
+            
+            start = time.time()
+            response = client.generate_for_monitor(
+                prompt=prompt,
+                system=system,
+                max_tokens=512,
+                temperature=0.2,
+                timeout=30.0
+            )
+            latency = (time.time() - start) * 1000
+            
+            # Try to parse JSON
+            data = client.extract_json(response)
+            
+            return {
+                "status": "success",
+                "mode": mode,
+                "model": response.model,
+                "latency_ms": round(latency, 1),
+                "response_preview": response.content[:200],
+                "parsed_json": data is not None,
+                "action": data.get("action") if data else None,
+                "confidence": data.get("confidence") if data else None
+            }
+        else:
+            # Test cloud mode
+            return {
+                "status": "success",
+                "mode": mode,
+                "message": "Cloud mode active - monitor will use primary/backup Ollama flow"
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "mode": mode if 'mode' in locals() else "unknown",
+            "error": str(e),
+            "hint": "If using local mode, ensure qwen2.5:14b is pulled: ollama pull qwen2.5:14b"
+        }
+
+
 # === Strategies ===
 
 @app.get("/api/strategies")
@@ -524,7 +726,7 @@ def get_trades(
         SELECT id, signal_id, strategy_name, symbol, direction, status,
                entry_price, exit_price, stop_loss, take_profit,
                quantity, leverage, pnl, pnl_percent, fees,
-               openclaw_approved, openclaw_analysis, openclaw_confidence,
+               ai_approved, ai_analysis, ai_confidence,
                signal_time, approved_time, entry_time, exit_time,
                entry_screenshot, exit_screenshot, metadata,
                trailing_stop_trigger, trailing_stop_lock, trailing_stop_activated
@@ -577,7 +779,7 @@ def get_trades(
         # Convert Decimal to float
         for key in ['entry_price', 'exit_price', 'stop_loss', 'take_profit',
                     'quantity', 'leverage', 'pnl', 'pnl_percent', 'fees',
-                    'openclaw_confidence', 'trailing_stop_trigger', 'trailing_stop_lock']:
+                    'ai_confidence', 'trailing_stop_trigger', 'trailing_stop_lock']:
             if trade[key] is not None:
                 trade[key] = float(trade[key])
         if 'trailing_stop_activated' in trade:
@@ -596,7 +798,7 @@ def get_trade(trade_id: int):
         SELECT id, signal_id, strategy_name, symbol, direction, status,
                entry_price, exit_price, stop_loss, take_profit,
                quantity, leverage, pnl, pnl_percent, fees,
-               openclaw_approved, openclaw_analysis, openclaw_confidence,
+               ai_approved, ai_analysis, ai_confidence,
                signal_time, approved_time, entry_time, exit_time,
                entry_screenshot, exit_screenshot, metadata,
                trailing_stop_trigger, trailing_stop_lock, trailing_stop_activated
@@ -619,7 +821,7 @@ def get_trade(trade_id: int):
             trade[key] = trade[key].isoformat()
     for key in ['entry_price', 'exit_price', 'stop_loss', 'take_profit',
                 'quantity', 'leverage', 'pnl', 'pnl_percent', 'fees',
-                'openclaw_confidence', 'trailing_stop_trigger', 'trailing_stop_lock']:
+                'ai_confidence', 'trailing_stop_trigger', 'trailing_stop_lock']:
         if trade[key] is not None:
             trade[key] = float(trade[key])
     if 'trailing_stop_activated' in trade:
@@ -653,39 +855,14 @@ def close_trade(trade_id: int, request: CloseTradeRequest = None):
 
 @app.get("/api/positions")
 def get_open_positions_api():
-    """Get all open positions with current P&L (OANDA only when in OANDA mode)."""
+    """Get all open positions from OANDA."""
     tm = get_trade_manager()
     engine = get_engine()
     
     positions_list = []
     
-    # Only show paper trades if in paper mode
-    if engine.broker_mode == "paper":
-        # Get paper/DB positions
-        positions = tm.get_open_positions()
-        for p in positions:
-            positions_list.append({
-                "trade_id": p.trade_id,
-                "symbol": p.symbol,
-                "direction": p.direction.value,
-                "entry_price": p.entry_price,
-                "current_price": p.current_price,
-                "quantity": p.quantity,
-                "stop_loss": p.stop_loss,
-                "take_profit": p.take_profit,
-                "unrealized_pnl": p.unrealized_pnl,
-                "unrealized_pnl_pct": p.unrealized_pnl_pct,
-                "is_profitable": p.is_profitable,
-                "opened_at": p.opened_at.isoformat(),
-                "strategy_name": p.strategy_name,
-                "broker": "paper",
-                "trailing_stop_trigger": p.trailing_stop_trigger,
-                "trailing_stop_lock": p.trailing_stop_lock,
-                "trailing_stop_activated": p.trailing_stop_activated
-            })
-    
-    # Get OANDA positions if in OANDA mode
-    if engine.broker_mode == "oanda" and engine.oanda_broker:
+    # Get OANDA positions
+    if engine.oanda_broker:
         oanda_trades = engine.oanda_broker.get_open_trades()
         
         # Get strategy names from database for OANDA trades
@@ -744,7 +921,7 @@ def get_open_positions_api():
     
     return {
         "positions": positions_list,
-        "summary": tm.get_summary() if engine.broker_mode == "paper" else {"total_positions": len(positions_list), "total_unrealized_pnl": sum(p["unrealized_pnl"] for p in positions_list)}
+        "summary": {"total_positions": len(positions_list), "total_unrealized_pnl": sum(p["unrealized_pnl"] for p in positions_list)}
     }
 
 
@@ -920,7 +1097,7 @@ def clear_all_history():
 
 @app.get("/api/positions")
 def get_positions():
-    """Get all open positions (paper + OANDA)."""
+    """Get all open positions from OANDA."""
     positions = []
     summary = {
         "total_positions": 0,
@@ -929,26 +1106,6 @@ def get_positions():
         "losing_positions": 0,
         "by_symbol": {}
     }
-
-    # Get paper trading positions
-    engine = get_engine()
-    paper_positions = engine.executor.get_open_positions()
-    for p in paper_positions:
-        positions.append({
-            "trade_id": str(p.trade_id),
-            "symbol": p.symbol,
-            "direction": p.direction.value,
-            "entry_price": p.entry_price,
-            "current_price": p.current_price,
-            "quantity": p.quantity,
-            "stop_loss": p.stop_loss,
-            "take_profit": p.take_profit,
-            "unrealized_pnl": p.unrealized_pnl,
-            "unrealized_pnl_pct": ((p.current_price - p.entry_price) / p.entry_price * 100) if p.direction.value == "long" else ((p.entry_price - p.current_price) / p.entry_price * 100),
-            "strategy_name": getattr(p, 'strategy_name', 'Unknown'),
-            "broker": "paper",
-            "opened_at": p.opened_at.isoformat() if hasattr(p, 'opened_at') else None
-        })
 
     # Get OANDA positions
     try:
@@ -1202,6 +1359,25 @@ def list_logs():
 
 
 # === Screenshots ===
+
+@app.get("/api/screenshots/status")
+def get_screenshots_status():
+    """Get current screenshot enabled status."""
+    engine = get_engine()
+    return {"enabled": engine.screenshot_service.is_enabled()}
+
+
+class ScreenshotToggleRequest(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/screenshots/toggle")
+def toggle_screenshots(request: ScreenshotToggleRequest):
+    """Enable or disable screenshots."""
+    engine = get_engine()
+    engine.screenshot_service.set_enabled(request.enabled)
+    return {"enabled": request.enabled}
+
 
 @app.get("/api/screenshots/{trade_id}")
 def get_trade_screenshots(trade_id: int):
@@ -1772,15 +1948,7 @@ def close_bucket(bucket_name: str):
                 else:
                     errors.append({"trade_id": trade_id, "error": result.error})
             else:
-                # Paper trade
-                result = requests.post(
-                    f"http://localhost:8000/api/trades/{trade_id}/close",
-                    json={"reason": f"Bucket close: {bucket_name}"}
-                )
-                if result.status_code == 200:
-                    closed.append(trade_id)
-                else:
-                    errors.append({"trade_id": trade_id, "error": result.text})
+                errors.append({"trade_id": trade_id, "error": "Unknown broker"})
         except Exception as e:
             errors.append({"trade_id": trade_id, "error": str(e)})
 

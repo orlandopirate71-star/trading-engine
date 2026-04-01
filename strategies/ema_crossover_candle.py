@@ -82,11 +82,11 @@ class EMACrossoverCandleStrategy(BaseStrategy):
     
     def on_candle(self, symbol: str, candle: dict) -> Optional[TradeSignal]:
         """Process candle close."""
-        if symbol not in self.symbols:
+        if symbol not in self.active_symbols:
             return None
-        
+
         history = candle.get("history")
-        if not history or len(history) < self.slow_period + 5:
+        if history is None or len(history) < self.slow_period + 5:
             return None
         
         # Track candle count for cooldown

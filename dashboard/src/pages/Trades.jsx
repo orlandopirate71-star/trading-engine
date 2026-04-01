@@ -129,7 +129,7 @@ export default function Trades() {
             pnl_percent: pnlPercent,
             is_win: isWin,
             exit_reason: exitReason,
-            openclaw_approved: true,
+            ai_approved: true,
             signal_time: t.time,
             entry_time: t.time,
             exit_time: t.time,
@@ -139,7 +139,7 @@ export default function Trades() {
         setTrades(oandaTrades)
         setTotal(oandaTrades.length)
       } else {
-        // Fetch paper trades
+        // Fetch trades from database
         const params = new URLSearchParams({
           limit: limit.toString(),
           offset: ((page - 1) * limit).toString()

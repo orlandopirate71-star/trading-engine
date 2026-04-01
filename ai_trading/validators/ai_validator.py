@@ -212,19 +212,19 @@ class AITradeValidator:
         trade = self._create_trade_from_signal(signal, approved=result.approved)
 
         # Add AI analysis to trade
-        trade.openclaw_approved = result.approved
-        trade.openclaw_confidence = result.confidence
-        trade.openclaw_analysis = result.reasoning
+        trade.ai_approved = result.approved
+        trade.ai_confidence = result.confidence
+        trade.ai_analysis = result.reasoning
 
         # Determine if should execute
+        # AI-approved trades with auto_trade enabled should execute automatically
+        # require_approval is for manual dashboard review (not used in this flow)
         if not result.approved:
-            should_execute = False
-        elif self.require_approval:
-            should_execute = False  # Needs manual approval
+            should_execute = False  # AI rejected
         elif not self.auto_trade:
             should_execute = False  # Auto trade disabled
         else:
-            should_execute = True
+            should_execute = True  # AI approved + auto enabled = execute
 
         return should_execute, trade
 
@@ -247,9 +247,9 @@ class AITradeValidator:
             pnl=0,
             pnl_percent=0,
             fees=0,
-            openclaw_approved=approved,
-            openclaw_analysis="",
-            openclaw_confidence=0,
+            ai_approved=approved,
+            ai_analysis="",
+            ai_confidence=0,
             signal_time=signal.timestamp,
             approved_time=None,
             entry_screenshot=None,
@@ -275,6 +275,34 @@ class AITradeValidator:
         self._enabled = enabled
         print(f"[AI Validator] Validator {'enabled' if enabled else 'disabled'}")
 
+    def set_confidence_threshold(self, threshold: float):
+        """Update the minimum confidence threshold for trade approval."""
+        self.validator.min_confidence = threshold
+        print(f"[AI Validator] Signal confidence threshold updated to {threshold:.2f}")
+
+    def get_confidence_threshold(self) -> float:
+        """Get the current minimum confidence threshold for signal validation."""
+        return self.validator.min_confidence
+
+    def set_monitor_confidence_threshold(self, threshold: float):
+        """Update the confidence threshold for position monitoring (lower = more active management)."""
+        # Update position monitor if it exists
+        from trading_engine import get_engine
+        engine = get_engine()
+        if engine.position_monitor:
+            engine.position_monitor.confidence_threshold = threshold
+            print(f"[AI Validator] Monitor confidence threshold updated to {threshold:.2f}")
+        else:
+            print(f"[AI Validator] Warning: Position monitor not initialized")
+
+    def get_monitor_confidence_threshold(self) -> float:
+        """Get the current confidence threshold for position monitoring."""
+        from trading_engine import get_engine
+        engine = get_engine()
+        if engine.position_monitor:
+            return engine.position_monitor.confidence_threshold
+        return 0.6  # Default
+
 
 # Singleton instance
 _validator = None
@@ -289,7 +317,7 @@ def get_ai_validator() -> AITradeValidator:
 
 
 def init_ai_validator(
-    min_confidence: float = 0.6,
+    min_confidence: float = 0.75,
     max_risk_score: float = 0.7,
     auto_trade: bool = True,
     require_approval: bool = False,

@@ -59,6 +59,7 @@ class ScreenshotService:
         self.driver = None
         self.tradingview_url_template = "https://www.tradingview.com/widgetembed/?symbol={exchange}:{symbol}&interval={interval}&width=1920&height=1080"
         self.credentials_file = Path(__file__).parent / "screenshot_credentials.json"
+        self._enabled = True  # Screenshots enabled by default
 
     def _load_credentials(self) -> dict:
         if self.credentials_file.exists():
@@ -92,6 +93,15 @@ class ScreenshotService:
             print(f"[SCREENSHOT] Failed to initialize Chrome driver: {e}")
             return False
 
+    def set_enabled(self, enabled: bool):
+        """Enable or disable screenshots."""
+        self._enabled = enabled
+        print(f"[SCREENSHOT] Screenshots {'enabled' if enabled else 'disabled'}")
+
+    def is_enabled(self) -> bool:
+        """Check if screenshots are enabled."""
+        return self._enabled
+
     def capture_tradingview(
         self,
         symbol: str,
@@ -100,6 +110,9 @@ class ScreenshotService:
         exchange: str = None,
         timeframes: List[str] = None
     ) -> List[Dict[str, str]]:
+        if not self._enabled:
+            return [{"timeframe": "disabled", "path": None}]
+        
         if not SELENIUM_AVAILABLE:
             return [{"timeframe": "placeholder", "path": self._capture_placeholder(symbol, trade_id, event_type)}]
 
@@ -131,6 +144,9 @@ class ScreenshotService:
         return results if results else [{"timeframe": "error", "path": None}]
 
     def capture_full_screen(self, trade_id: int, event_type: str = "entry", region: dict = None) -> Optional[str]:
+        if not self._enabled:
+            return None
+        
         if not MSS_AVAILABLE:
             return None
         try:

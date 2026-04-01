@@ -29,9 +29,103 @@ Your role:
 Output JSON only. No markdown, no explanation outside JSON."""
 
 
-# ============================================================================
-# SIGNAL VALIDATION PROMPT
-# ============================================================================
+# Optimized system prompt for local LLM (qwen2.5:14b)
+POSITION_MONITOR_SYSTEM_LOCAL = """You are a professional forex/crypto position manager. Analyze open positions and make clear decisions.
+
+RULES:
+- HOLD: Price moving with trend, no reversal signals
+- CLOSE: Strong reversal pattern or invalidation
+- EXTEND: Strong momentum in direction of trade
+- TRAIL_STOP: Lock profits by moving SL to breakeven or better
+- ADJUST_TP: TP needs adjustment based on new levels
+
+Always output valid JSON. Be decisive."""
+
+
+# Optimized prompt for local LLM - shorter, more structured
+POSITION_MONITOR_PROMPT_LOCAL = """## POSITION
+Symbol: {symbol} | Direction: {direction}
+Entry: {entry} | Current: {current}
+SL: {sl} | TP: {tp}
+P&L: {pnl_pct:.2f}%
+
+## MARKET
+{market_context}
+
+## RECENT PRICE ACTION
+{candles_text}
+
+## DECISION
+Choose ONE action: HOLD, CLOSE, EXTEND, TRAIL_STOP, ADJUST_TP
+
+Respond with JSON:
+{{
+  "action": "HOLD|CLOSE|EXTEND|TRAIL_STOP|ADJUST_TP",
+  "confidence": 0.0-1.0,
+  "reasoning": "brief technical reason",
+  "urgency": "low|medium|high",
+  "new_stop_loss": number_or_null,
+  "new_take_profit": number_or_null,
+  "close_percentage": 0.0-1.0
+}}"""
+
+
+def position_monitor_prompt_local(
+    position_data: dict,
+    market_context: str,
+    recent_candles: list
+) -> str:
+    """
+    Generate optimized prompt for local LLM (qwen2.5:14b) monitoring.
+    Shorter, more structured format for smaller models.
+    """
+    symbol = position_data.get("symbol", "UNKNOWN")
+    direction = position_data.get("direction", "UNKNOWN")
+    entry = position_data.get("entry_price", 0)
+    current = position_data.get("current_price", 0)
+    sl = position_data.get("stop_loss", 0)
+    tp = position_data.get("take_profit", 0)
+    unrealized_pnl = position_data.get("unrealized_pnl", 0)
+    
+    # Calculate current profit/loss
+    if entry > 0 and current > 0:
+        if direction.upper() == "LONG":
+            pnl_pct = ((current - entry) / entry) * 100
+        else:
+            pnl_pct = ((entry - current) / entry) * 100
+    else:
+        pnl_pct = 0
+    
+    # Format candles - simpler format for local LLM
+    candles_text = ""
+    if recent_candles:
+        lines = []
+        for c in recent_candles[:10]:  # Limit to 10 candles for local model
+            time_str = c.get("time", c.get("timestamp", ""))[-8:] if c.get("time") else ""
+            o = c.get("open", 0)
+            h = c.get("high", 0)
+            l = c.get("low", 0)
+            c_val = c.get("close", 0)
+            trend = "↑" if c_val > o else "↓" if c_val < o else "→"
+            lines.append(f"{time_str} {trend} O:{o:.4f} H:{h:.4f} L:{l:.4f} C:{c_val:.4f}")
+        candles_text = "\n".join(lines)
+    else:
+        candles_text = "No recent data"
+    
+    # Simplified market context
+    market_summary = market_context[:500] if len(market_context) > 500 else market_context
+    
+    return POSITION_MONITOR_PROMPT_LOCAL.format(
+        symbol=symbol,
+        direction=direction.upper(),
+        entry=entry,
+        current=current,
+        sl=sl,
+        tp=tp,
+        pnl_pct=pnl_pct,
+        market_context=market_summary,
+        candles_text=candles_text
+    )
 
 def signal_validation_prompt(
     strategy_name: str,

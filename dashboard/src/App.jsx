@@ -61,6 +61,13 @@ function App() {
   const [candleCount, setCandleCount] = useState(0)
   const [marketOpen, setMarketOpen] = useState(true)  // Assume open unless we detect closed
 
+  const [aiConfidence, setAiConfidence] = useState(0.75)
+  const [monitorConfidence, setMonitorConfidence] = useState(0.60)
+  const [ollamaMode, setOllamaMode] = useState('auto')
+  const [usingBackup, setUsingBackup] = useState(false)
+  const [monitorAiMode, setMonitorAiMode] = useState('cloud')
+  const [screenshotsEnabled, setScreenshotsEnabled] = useState(true)
+
   const fetchStatus = async () => {
     try {
       const res = await fetch('/api/status')
@@ -69,6 +76,107 @@ function App() {
       setMarketOpen(data.market_open !== false)
     } catch (err) {
       console.error('Failed to fetch status:', err)
+    }
+  }
+
+  const fetchAiConfidence = async () => {
+    try {
+      const res = await fetch('/api/ai-confidence')
+      const data = await res.json()
+      setAiConfidence(data.confidence_threshold)
+    } catch (err) {
+      console.error('Failed to fetch AI confidence:', err)
+    }
+  }
+
+  const fetchMonitorConfidence = async () => {
+    try {
+      const res = await fetch('/api/ai-monitor-confidence')
+      const data = await res.json()
+      setMonitorConfidence(data.monitor_confidence)
+    } catch (err) {
+      console.error('Failed to fetch monitor confidence:', err)
+    }
+  }
+
+  const fetchOllamaMode = async () => {
+    try {
+      const res = await fetch('/api/ollama-mode')
+      const data = await res.json()
+      setOllamaMode(data.mode || 'auto')
+      setUsingBackup(data.using_backup || false)
+    } catch (err) {
+      console.error('Failed to fetch Ollama mode:', err)
+    }
+  }
+
+  const toggleOllamaMode = async () => {
+    const modes = ['auto', 'primary', 'backup']
+    const currentIndex = modes.indexOf(ollamaMode)
+    const nextMode = modes[(currentIndex + 1) % modes.length]
+    
+    setOllamaMode(nextMode)
+    try {
+      await fetch('/api/ollama-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: nextMode })
+      })
+      // Refresh to get actual status
+      fetchOllamaMode()
+    } catch (err) {
+      console.error('Failed to set Ollama mode:', err)
+    }
+  }
+
+  const fetchMonitorAiMode = async () => {
+    try {
+      const res = await fetch('/api/monitor-ai-mode')
+      const data = await res.json()
+      setMonitorAiMode(data.mode || 'cloud')
+    } catch (err) {
+      console.error('Failed to fetch monitor AI mode:', err)
+    }
+  }
+
+  const toggleMonitorAiMode = async () => {
+    const nextMode = monitorAiMode === 'cloud' ? 'local' : 'cloud'
+    
+    setMonitorAiMode(nextMode)
+    try {
+      await fetch('/api/monitor-ai-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: nextMode })
+      })
+      // Refresh to get actual status
+      fetchMonitorAiMode()
+    } catch (err) {
+      console.error('Failed to set monitor AI mode:', err)
+    }
+  }
+
+  const fetchScreenshotsStatus = async () => {
+    try {
+      const res = await fetch('/api/screenshots/status')
+      const data = await res.json()
+      setScreenshotsEnabled(data.enabled)
+    } catch (err) {
+      console.error('Failed to fetch screenshots status:', err)
+    }
+  }
+
+  const toggleScreenshots = async () => {
+    const nextState = !screenshotsEnabled
+    setScreenshotsEnabled(nextState)
+    try {
+      await fetch('/api/screenshots/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: nextState })
+      })
+    } catch (err) {
+      console.error('Failed to toggle screenshots:', err)
     }
   }
 
@@ -131,13 +239,20 @@ function App() {
     fetchBiases()
     fetchSymbolUnits()
     fetchCandleCount()
+    fetchAiConfidence()
+    fetchMonitorConfidence()
+    fetchOllamaMode()
+    fetchMonitorAiMode()
+    fetchScreenshotsStatus()
     const interval = setInterval(fetchStatus, 5000)
     const biasInterval = setInterval(fetchBiases, 30000)
     const candleInterval = setInterval(fetchCandleCount, 60000)
+    const ollamaInterval = setInterval(fetchOllamaMode, 10000)  // Check Ollama status every 10s
     return () => {
       clearInterval(interval)
       clearInterval(biasInterval)
       clearInterval(candleInterval)
+      clearInterval(ollamaInterval)
     }
   }, [biasTimeframe])
 
@@ -192,6 +307,34 @@ function App() {
       body: JSON.stringify({ required: !status?.require_approval })
     })
     fetchStatus()
+  }
+
+  const updateAiConfidence = async (value) => {
+    const threshold = parseFloat(value)
+    setAiConfidence(threshold)
+    try {
+      await fetch('/api/ai-confidence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold })
+      })
+    } catch (err) {
+      console.error('Failed to update AI confidence:', err)
+    }
+  }
+
+  const updateMonitorConfidence = async (value) => {
+    const threshold = parseFloat(value)
+    setMonitorConfidence(threshold)
+    try {
+      await fetch('/api/ai-monitor-confidence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold })
+      })
+    } catch (err) {
+      console.error('Failed to update monitor confidence:', err)
+    }
   }
 
   const [showClearMenu, setShowClearMenu] = useState(false)
@@ -367,10 +510,89 @@ function App() {
             </div>
 
             <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Signal Conf</span>
+              <span className="text-xs text-purple-400 font-mono">{(aiConfidence * 100).toFixed(0)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.50"
+              max="0.95"
+              step="0.05"
+              value={aiConfidence}
+              onChange={(e) => updateAiConfidence(e.target.value)}
+              className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-purple-500"
+              title="Min confidence for trade entry approval"
+            />
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Monitor Conf</span>
+              <span className="text-xs text-blue-400 font-mono">{(monitorConfidence * 100).toFixed(0)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.30"
+              max="0.80"
+              step="0.05"
+              value={monitorConfidence}
+              onChange={(e) => updateMonitorConfidence(e.target.value)}
+              className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              title="Min confidence for position management (lower = more active)"
+            />
+
+            <div className="flex items-center justify-between">
               <span className="text-xs text-gray-400">Validator</span>
               <span className="px-2 py-1 rounded text-xs font-medium bg-purple-600">
                 AI
               </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Ollama</span>
+              <button
+                onClick={toggleOllamaMode}
+                className={`px-2 py-1 rounded text-xs font-medium ${
+                  ollamaMode === 'backup' 
+                    ? 'bg-orange-600' 
+                    : ollamaMode === 'primary'
+                    ? 'bg-green-600'
+                    : usingBackup
+                    ? 'bg-yellow-600'
+                    : 'bg-green-600'
+                }`}
+                title={`Mode: ${ollamaMode} | Click to cycle: auto → primary → backup → auto`}
+              >
+                {ollamaMode === 'auto' && usingBackup ? 'BACKUP' : ollamaMode.toUpperCase()}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Monitor AI</span>
+              <button
+                onClick={toggleMonitorAiMode}
+                className={`px-2 py-1 rounded text-xs font-medium ${
+                  monitorAiMode === 'local' 
+                    ? 'bg-teal-600' 
+                    : 'bg-indigo-600'
+                }`}
+                title={`Monitor AI: ${monitorAiMode === 'local' ? 'Local qwen2.5:14b' : 'Cloud Ollama'} | Click to toggle`}
+              >
+                {monitorAiMode === 'local' ? 'LOCAL' : 'CLOUD'}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Screenshots</span>
+              <button
+                onClick={toggleScreenshots}
+                className={`px-2 py-1 rounded text-xs font-medium ${
+                  screenshotsEnabled
+                    ? 'bg-green-600'
+                    : 'bg-gray-600'
+                }`}
+                title={`Screenshots ${screenshotsEnabled ? 'ON' : 'OFF'} | Click to toggle`}
+              >
+                {screenshotsEnabled ? 'ON' : 'OFF'}
+              </button>
             </div>
 
             {/* Clear History */}
