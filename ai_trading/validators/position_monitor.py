@@ -251,17 +251,19 @@ class PositionMonitor:
         using_local = mode_value == 'local'
         local_base = getattr(current_ai, '_monitor_local_base', 'N/A')
         print(f"[PositionMonitor] AI mode check: _monitor_ai_mode={mode_value}, using_local={using_local}, local_base={local_base}")
-        
+
         if using_local:
-            # Use optimized local prompts
+            # Build portfolio context for local model (shorter prompt, needs summarized data)
+            portfolio_context = self._build_portfolio_context(position, all_positions)
             prompt = position_monitor_prompt_local(
                 position_data=position,
                 market_context=market_context,
-                recent_candles=recent_candles
+                recent_candles=recent_candles,
+                portfolio_context=portfolio_context
             )
             system_prompt = POSITION_MONITOR_SYSTEM_LOCAL
         else:
-            # Use cloud prompts (original)
+            # Use cloud prompts (original) - gets full open_trade_history directly
             prompt = position_monitor_prompt(
                 position_data=position,
                 market_context=market_context,
@@ -291,6 +293,10 @@ class PositionMonitor:
 
             result = self._parse_response(response)
             result.latency_ms = (time.time() - start_time) * 1000
+
+            # Store AI decision in Redis for outcome tracking (learning feedback)
+            if result.action != PositionAction.HOLD:
+                self._store_ai_decision(position, result)
 
             # Update Brain
             self._update_brain(position, result)
@@ -386,6 +392,97 @@ class PositionMonitor:
             )
         except Exception as e:
             print(f"[PositionMonitor] Failed to update Brain: {e}")
+
+    def _store_ai_decision(self, position: dict, result: MonitorResult):
+        """Store AI decision in Redis for outcome tracking and learning feedback."""
+        try:
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            from connections import redis_client
+            import json
+
+            trade_id = position.get("trade_id")
+            if not trade_id:
+                return
+
+            decision_data = {
+                "action": result.action.value,
+                "price": position.get("current_price", 0),
+                "confidence": result.confidence,
+                "urgency": result.urgency,
+                "reasoning": result.reasoning[:200],  # Truncate for storage
+                "symbol": position.get("symbol"),
+                "direction": position.get("direction"),
+                "strategy_name": position.get("strategy_name"),
+                "entry_price": position.get("entry_price"),
+                "stop_loss": position.get("stop_loss"),
+                "take_profit": position.get("take_profit"),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+            # Store for 7 days (足够长以覆盖长线持仓)
+            redis_client.setex(
+                f"ai_decision:{trade_id}",
+                604800,  # 7 days
+                json.dumps(decision_data)
+            )
+            print(f"[PositionMonitor] Stored AI decision for trade {trade_id}: {result.action.value}")
+        except Exception as e:
+            print(f"[PositionMonitor] Failed to store AI decision: {e}")
+
+    def _build_portfolio_context(self, current_position: dict, all_positions: list) -> dict:
+        """Build portfolio-level context for AI prompt.
+
+        Args:
+            current_position: The position being analyzed
+            all_positions: List of all open positions
+
+        Returns:
+            Dict with total_positions, total_pnl, same_dir_count, opp_dir_count, size_pct
+        """
+        try:
+            symbol = current_position.get("symbol", "")
+            direction = current_position.get("direction", "")
+            quantity = current_position.get("quantity", 0)
+
+            total_positions = len(all_positions)
+            total_pnl = sum(p.get("unrealized_pnl", 0) for p in all_positions)
+
+            # Count same-direction and opposite-direction positions for this symbol
+            same_dir_count = 0
+            opp_dir_count = 0
+            for pos in all_positions:
+                if pos.get("symbol") == symbol and pos.get("trade_id") != current_position.get("trade_id"):
+                    if pos.get("direction", "").upper() == direction.upper():
+                        same_dir_count += 1
+                    else:
+                        opp_dir_count += 1
+
+            # Calculate position size as percentage of account (rough estimate)
+            # Assuming 1 lot = $100,000 notional, account ~$10k-50k
+            # This is a rough approximation - actual would need account balance
+            estimated_account = 20000  # Rough estimate
+            lot_size = 100000
+            position_value = quantity * lot_size
+            size_pct = min(100, (position_value / estimated_account) * 100)
+
+            return {
+                "total_positions": total_positions,
+                "total_pnl": total_pnl,
+                "same_dir_count": same_dir_count,
+                "opp_dir_count": opp_dir_count,
+                "size_pct": size_pct
+            }
+        except Exception as e:
+            print(f"[PositionMonitor] Error building portfolio context: {e}")
+            return {
+                "total_positions": len(all_positions) if all_positions else 1,
+                "total_pnl": 0,
+                "same_dir_count": 0,
+                "opp_dir_count": 0,
+                "size_pct": 0
+            }
 
     def should_act(self, result: MonitorResult) -> bool:
         """Check if action should be executed based on thresholds and auto_trade setting."""

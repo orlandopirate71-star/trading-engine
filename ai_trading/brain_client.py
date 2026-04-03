@@ -7,6 +7,7 @@ import time
 import requests
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass
@@ -185,6 +186,60 @@ class BrainClient:
             content=f"Trade #{trade_id} Analysis: {analysis} | Outcome: {outcome}",
             memory_type="trade_analysis",
             metadata={"trade_id": trade_id, "outcome": outcome}
+        )
+
+    def add_decision_feedback(
+        self,
+        trade_id: int,
+        symbol: str,
+        strategy_name: str,
+        action: str,
+        decision_price: float,
+        decision_confidence: float,
+        outcome: str,  # "closed_profit", "closed_loss", "still_open", "hit_sl", "hit_tp"
+        exit_price: float = None,
+        pnl: float = None,
+        reasoning: str = ""
+    ) -> bool:
+        """
+        Store AI monitor decision feedback for learning.
+
+        This records what the AI decided when monitoring a position,
+        and the eventual outcome, so the AI can learn from its decisions.
+        """
+        content = f"""# AI Monitor Decision Feedback
+
+## Trade: {symbol}
+## Strategy: {strategy_name}
+
+### AI Decision
+- Action: {action}
+- Price when decided: {decision_price}
+- Confidence: {decision_confidence}
+- Reasoning: {reasoning}
+
+### Outcome
+- Result: {outcome}
+- Exit price: {exit_price}
+- P&L: ${pnl if pnl is not None else 'N/A'}
+
+### Timestamp
+{datetime.utcnow().isoformat()}
+"""
+        return self.add_memory(
+            content=content,
+            memory_type="ai_decision_feedback",
+            metadata={
+                "trade_id": trade_id,
+                "symbol": symbol,
+                "strategy_name": strategy_name,
+                "action": action,
+                "decision_price": decision_price,
+                "decision_confidence": decision_confidence,
+                "outcome": outcome,
+                "exit_price": exit_price,
+                "pnl": pnl
+            }
         )
 
 

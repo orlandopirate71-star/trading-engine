@@ -47,7 +47,11 @@ POSITION_MONITOR_PROMPT_LOCAL = """## POSITION
 Symbol: {symbol} | Direction: {direction}
 Entry: {entry} | Current: {current}
 SL: {sl} | TP: {tp}
-P&L: {pnl_pct:.2f}%
+P&L: {pnl_pct:.2f}% | Size: {quantity} lots ({size_pct:.1f}% of account)
+
+## PORTFOLIO
+Total: {total_positions} positions | Total P&L: ${total_pnl:.2f}
+Same-direction on {symbol}: {same_dir_count} | Opposite: {opp_dir_count}
 
 ## MARKET
 {market_context}
@@ -73,11 +77,18 @@ Respond with JSON:
 def position_monitor_prompt_local(
     position_data: dict,
     market_context: str,
-    recent_candles: list
+    recent_candles: list,
+    portfolio_context: dict = None
 ) -> str:
     """
     Generate optimized prompt for local LLM (qwen2.5:14b) monitoring.
     Shorter, more structured format for smaller models.
+
+    Args:
+        position_data: Current position state
+        market_context: Brain context for current market
+        recent_candles: Recent candles for analysis
+        portfolio_context: Dict with total_positions, total_pnl, same_dir_count, opp_dir_count, size_pct
     """
     symbol = position_data.get("symbol", "UNKNOWN")
     direction = position_data.get("direction", "UNKNOWN")
@@ -86,7 +97,8 @@ def position_monitor_prompt_local(
     sl = position_data.get("stop_loss", 0)
     tp = position_data.get("take_profit", 0)
     unrealized_pnl = position_data.get("unrealized_pnl", 0)
-    
+    quantity = position_data.get("quantity", 0)
+
     # Calculate current profit/loss
     if entry > 0 and current > 0:
         if direction.upper() == "LONG":
@@ -95,7 +107,15 @@ def position_monitor_prompt_local(
             pnl_pct = ((entry - current) / entry) * 100
     else:
         pnl_pct = 0
-    
+
+    # Portfolio context with defaults
+    portfolio = portfolio_context or {}
+    total_positions = portfolio.get("total_positions", 1)
+    total_pnl = portfolio.get("total_pnl", 0)
+    same_dir_count = portfolio.get("same_dir_count", 0)
+    opp_dir_count = portfolio.get("opp_dir_count", 0)
+    size_pct = portfolio.get("size_pct", 0)
+
     # Format candles - simpler format for local LLM
     candles_text = ""
     if recent_candles:
@@ -111,10 +131,10 @@ def position_monitor_prompt_local(
         candles_text = "\n".join(lines)
     else:
         candles_text = "No recent data"
-    
+
     # Simplified market context
     market_summary = market_context[:500] if len(market_context) > 500 else market_context
-    
+
     return POSITION_MONITOR_PROMPT_LOCAL.format(
         symbol=symbol,
         direction=direction.upper(),
@@ -123,6 +143,12 @@ def position_monitor_prompt_local(
         sl=sl,
         tp=tp,
         pnl_pct=pnl_pct,
+        quantity=quantity,
+        size_pct=size_pct,
+        total_positions=total_positions,
+        total_pnl=total_pnl,
+        same_dir_count=same_dir_count,
+        opp_dir_count=opp_dir_count,
         market_context=market_summary,
         candles_text=candles_text
     )

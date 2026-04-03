@@ -392,7 +392,14 @@ class TradingEngine:
                 self._ai_adjust_stop(trade_id, result.new_stop_loss, result)
             elif action == "ADJUST_TP" and result.new_take_profit:
                 self._ai_adjust_tp(trade_id, result.new_take_profit, result)
-            # EXTEND would require adding to position - not implemented yet
+            elif action == "EXTEND":
+                # EXTEND requires higher confidence threshold (0.85)
+                if result.confidence >= 0.85:
+                    # For EXTEND, close_percentage is the fraction of current position to add
+                    add_fraction = result.close_percentage if result.close_percentage > 0 else 0.5
+                    self._ai_extend_position(trade_id, add_fraction, result)
+                else:
+                    print(f"[ENGINE] EXTEND ignored for {position.get('symbol')}: confidence {result.confidence:.2f} < 0.85")
 
         except Exception as e:
             print(f"[ENGINE] Error handling monitor action: {e}")
@@ -405,8 +412,69 @@ class TradingEngine:
                 close_result = self.oanda_broker.close_trade(oanda_trade_id)
                 if close_result.success:
                     print(f"[ENGINE] AI closed OANDA trade {oanda_trade_id}")
+                    # Send outcome feedback to Brain for learning
+                    self._send_ai_decision_feedback(
+                        trade_id=trade_id,
+                        symbol=close_result.get("instrument", ""),
+                        outcome="closed_by_ai",
+                        exit_price=close_result.get("price", 0),
+                        pnl=close_result.get("pnl", 0)
+                    )
         except Exception as e:
             print(f"[ENGINE] Error closing position: {e}")
+
+    def _send_ai_decision_feedback(self, trade_id: str, symbol: str, outcome: str, exit_price: float = None, pnl: float = None):
+        """Send AI decision feedback to Brain for learning."""
+        try:
+            # Get stored AI decision from Redis
+            decision_key = f"ai_decision:{trade_id}"
+            decision_data = redis_client.get(decision_key)
+
+            if not decision_data:
+                return  # No stored decision for this trade
+
+            import json
+            decision = json.loads(decision_data) if isinstance(decision_data, bytes) else json.loads(decision_data)
+
+            # Get brain client
+            from ai_trading.brain_client import get_brain_client
+            brain = get_brain_client()
+
+            # Determine outcome based on exit reason
+            if outcome == "closed_by_ai":
+                # AI initiated the close
+                if pnl is not None and pnl > 0:
+                    outcome_str = "closed_profit"
+                elif pnl is not None and pnl < 0:
+                    outcome_str = "closed_loss"
+                else:
+                    outcome_str = "closed_by_ai"
+            elif outcome == "hit_sl":
+                outcome_str = "hit_sl"
+            elif outcome == "hit_tp":
+                outcome_str = "hit_tp"
+            else:
+                outcome_str = outcome
+
+            brain.add_decision_feedback(
+                trade_id=trade_id,
+                symbol=symbol,
+                strategy_name=decision.get("strategy_name", "unknown"),
+                action=decision.get("action", "unknown"),
+                decision_price=decision.get("price", 0),
+                decision_confidence=decision.get("confidence", 0),
+                outcome=outcome_str,
+                exit_price=exit_price,
+                pnl=pnl,
+                reasoning=decision.get("reasoning", "")
+            )
+
+            # Clean up Redis key
+            redis_client.delete(decision_key)
+            print(f"[ENGINE] Sent AI decision feedback to Brain for {symbol}: {outcome_str}")
+
+        except Exception as e:
+            print(f"[ENGINE] Failed to send AI decision feedback: {e}")
 
     def _ai_adjust_stop(self, trade_id: str, new_stop: float, result):
         """Adjust stop loss based on AI monitor decision."""
@@ -465,6 +533,80 @@ class TradingEngine:
             conn.close()
         except Exception as e:
             print(f"[ENGINE] Error updating trade TP in DB: {e}")
+
+    def _ai_extend_position(self, trade_id: str, add_fraction: float, result):
+        """Add to existing position based on AI monitor EXTEND decision.
+
+        Args:
+            trade_id: Trade ID (with 'oanda_' prefix for OANDA trades)
+            add_fraction: Fraction of current position size to add (0.0-1.0)
+            result: MonitorResult from AI
+        """
+        try:
+            if not trade_id.startswith("oanda_"):
+                print(f"[ENGINE] EXTEND only supported for OANDA trades")
+                return
+
+            oanda_trade_id = trade_id.replace("oanda_", "")
+
+            # Get current position details
+            position_data = self._get_position_by_oanda_id(oanda_trade_id)
+            if not position_data:
+                print(f"[ENGINE] Could not find position for OANDA trade {oanda_trade_id}")
+                return
+
+            symbol = position_data.get("symbol")
+            direction = position_data.get("direction", "long")
+            current_units = position_data.get("units", 0.01)
+
+            # Calculate additional units (0.01-0.1 lot range)
+            additional_units = max(0.01, min(0.1, current_units * add_fraction))
+
+            # Place new order in same direction
+            side = "BUY" if direction.lower() == "long" else "SELL"
+            result_order = self.oanda_broker.place_market_order(symbol, side, additional_units)
+
+            if result_order.success:
+                print(f"[ENGINE] AI extended {symbol} by {additional_units:.2f} units (fraction: {add_fraction:.2f})")
+
+                # Log to Redis
+                try:
+                    import json
+                    event = {
+                        "type": "position_extend",
+                        "symbol": symbol,
+                        "trade_id": trade_id,
+                        "additional_units": additional_units,
+                        "total_units": current_units + additional_units,
+                        "confidence": result.confidence,
+                        "reasoning": result.reasoning[:200]
+                    }
+                    redis_client.lpush("ai_activity_log", json.dumps(event))
+                    redis_client.ltrim("ai_activity_log", 0, 499)
+                except:
+                    pass
+            else:
+                print(f"[ENGINE] AI EXTEND failed: {result_order.error}")
+
+        except Exception as e:
+            print(f"[ENGINE] Error extending position: {e}")
+
+    def _get_position_by_oanda_id(self, oanda_trade_id: str) -> Optional[dict]:
+        """Get position details by OANDA trade ID."""
+        try:
+            # Get trade details from OANDA
+            trade_details = self.oanda_broker.get_trade(oanda_trade_id)
+            if trade_details:
+                return {
+                    "symbol": trade_details.get("instrument"),
+                    "direction": trade_details.get("currentUnits", 0) > 0 and "long" or "short",
+                    "units": abs(trade_details.get("currentUnits", 0)),
+                    "entry_price": float(trade_details.get("price", 0)),
+                    "unrealized_pnl": float(trade_details.get("unrealizedPL", 0))
+                }
+        except Exception as e:
+            print(f"[ENGINE] Error getting position by OANDA ID: {e}")
+        return None
 
     def _oanda_sync_loop(self):
         """Background thread to periodically sync OANDA positions."""
@@ -567,6 +709,15 @@ class TradingEngine:
                             pnl_percent = %s
                         WHERE id = %s
                     """, (current_price, datetime.utcnow(), pnl, pnl_percent, trade_id))
+
+                    # Send AI decision feedback for learning (if there was an AI decision stored)
+                    self._send_ai_decision_feedback(
+                        trade_id=str(trade_id),
+                        symbol=symbol,
+                        outcome="closed_by_ai",  # We don't know if it was AI or market, but feedback is sent
+                        exit_price=current_price,
+                        pnl=pnl
+                    )
 
             conn.commit()
             cur.close()
