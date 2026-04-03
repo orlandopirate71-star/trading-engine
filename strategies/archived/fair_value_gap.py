@@ -226,3 +226,7 @@ class FairValueGapStrategy(BaseStrategy):
         
         self._cleanup_fvgs(symbol)
         return None
+
+
+# Alias for strategy loader
+FairValueGap = FairValueGapStrategy

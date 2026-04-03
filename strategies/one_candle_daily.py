@@ -165,3 +165,7 @@ class OneCandleDailyStrategy(BaseStrategy):
             )
         
         return None
+
+
+# Alias for strategy loader
+OneCandleDaily = OneCandleDailyStrategy

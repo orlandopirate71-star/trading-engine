@@ -96,6 +96,12 @@ class ScreenshotService:
     def set_enabled(self, enabled: bool):
         """Enable or disable screenshots."""
         self._enabled = enabled
+        # Persist to Redis
+        try:
+            from connections import redis_client
+            redis_client.set("screenshots_enabled", "1" if enabled else "0")
+        except Exception as e:
+            print(f"[SCREENSHOT] Failed to persist setting: {e}")
         print(f"[SCREENSHOT] Screenshots {'enabled' if enabled else 'disabled'}")
 
     def is_enabled(self) -> bool:
@@ -207,6 +213,16 @@ def get_screenshot_service(screenshots_dir: str = "screenshots") -> ScreenshotSe
     global _screenshot_service
     if _screenshot_service is None:
         _screenshot_service = ScreenshotService(screenshots_dir)
+        # Load persisted setting from Redis
+        try:
+            from connections import redis_client
+            saved = redis_client.get("screenshots_enabled")
+            if saved is not None:
+                enabled = saved.decode() if isinstance(saved, bytes) else saved
+                _screenshot_service._enabled = enabled == "1" or enabled == "True"
+                print(f"[SCREENSHOT] Loaded persisted setting: enabled={_screenshot_service._enabled}")
+        except Exception as e:
+            print(f"[SCREENSHOT] Could not load persisted setting: {e}")
     return _screenshot_service
 
 

@@ -162,3 +162,7 @@ class EMACrossoverCandleStrategy(BaseStrategy):
     def on_tick(self, symbol: str, price: float, timestamp: datetime) -> Optional[TradeSignal]:
         """Not used - this strategy only trades on candle close."""
         return None
+
+
+# Alias for strategy loader
+EMACrossoverCandle = EMACrossoverCandleStrategy

@@ -199,3 +199,7 @@ class VWAPRejectionStrategy(BaseStrategy):
             self.touched_vwap = False
         
         return None
+
+
+# Alias for strategy loader
+VWAPRejection = VWAPRejectionStrategy

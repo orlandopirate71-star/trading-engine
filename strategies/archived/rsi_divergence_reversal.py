@@ -239,3 +239,7 @@ class RSIDivergenceReversalStrategy(BaseStrategy):
             )
         
         return None
+
+
+# Alias for strategy loader
+RSIDivergenceReversal = RSIDivergenceReversalStrategy

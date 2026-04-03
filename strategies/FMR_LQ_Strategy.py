@@ -72,7 +72,7 @@ class FMR_LQ(BaseStrategy):
     def __init__(self, params: dict = None):
         super().__init__(params)
         self.min_rr = params.get('min_rr', 1.0) if params else 1.0
-        self.body_ratio_threshold = params.get('body_ratio_threshold', 0.90) if params else 0.90
+        self.body_ratio_threshold = params.get('body_ratio_threshold', 0.70) if params else 0.70
     
     def on_candle(self, symbol: str, candle: dict) -> Optional[TradeSignal]:
         """
@@ -93,8 +93,8 @@ class FMR_LQ(BaseStrategy):
         settings = FMR_LQ_SETTINGS[candle_tf]
         
         # Get enough candles for EMA200 calculation
-        candles = history.get_candles(250)
-        if len(candles) < 210:
+        candles = history.get_candles(150)
+        if len(candles) < 120:
             return None
         
         # Convert to DataFrame
@@ -115,8 +115,8 @@ class FMR_LQ(BaseStrategy):
             near_20_distance=settings["near_20_distance"],
             min_rr=self.min_rr,
             body_ratio_threshold=self.body_ratio_threshold,
-            min_bull_close_position=0.80,
-            max_bear_close_position=0.20,
+            min_bull_close_position=0.70,
+            max_bear_close_position=0.30,
         )
         
         if signal_data is None:

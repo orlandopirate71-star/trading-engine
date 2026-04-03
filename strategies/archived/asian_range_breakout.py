@@ -164,3 +164,7 @@ class AsianRangeBreakoutStrategy(BaseStrategy):
             )
         
         return None
+
+
+# Alias for strategy loader
+AsianRangeBreakout = AsianRangeBreakoutStrategy

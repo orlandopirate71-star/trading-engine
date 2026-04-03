@@ -156,10 +156,21 @@ class BaseStrategy:
         if ts_lock <= 0:
             ts_lock = None
 
+        # Normalize direction - accept both "LONG"/"BUY" and "SHORT"/"SELL"
+        direction_upper = direction.upper()
+        if direction_upper in ("LONG", "BUY"):
+            trade_direction = TradeDirection.LONG
+        elif direction_upper in ("SHORT", "SELL"):
+            trade_direction = TradeDirection.SHORT
+        else:
+            # Default to LONG for unrecognized directions
+            print(f"[Strategy] Warning: unrecognized direction '{direction}', defaulting to LONG")
+            trade_direction = TradeDirection.LONG
+
         return TradeSignal(
             strategy_name=self.name,
             symbol=symbol,
-            direction=TradeDirection.LONG if direction.upper() == "LONG" else TradeDirection.SHORT,
+            direction=trade_direction,
             entry_price=entry_price,
             stop_loss=stop_loss,
             take_profit=take_profit,
@@ -259,6 +270,12 @@ class StrategyLoader:
             
             # Instantiate the strategy
             instance = strategy_class()
+
+            # Load saved symbol selections from Redis
+            saved_symbols = redis_client.smembers(f"strategy_symbols:{instance.name}")
+            if saved_symbols:
+                instance.symbols = list(saved_symbols)
+                print(f"[LOADER] Loaded symbol selection for {instance.name}: {len(instance.symbols)} symbols")
 
             # Read source code for AI validation
             source_code = None
@@ -400,6 +417,7 @@ class StrategyLoader:
                     info["max_positions"] = getattr(s.instance, 'max_positions', 1)
                     info["max_positions_per_symbol"] = getattr(s.instance, 'max_positions_per_symbol', 1)
                     info["symbols"] = getattr(s.instance, 'active_symbols', [])
+                    info["uses_all_symbols"] = s.instance.symbols is None
                     info["pip_multipliers"] = getattr(s.instance, 'pip_multipliers', None)
                     info["trailing_stop_trigger"] = getattr(s.instance, 'trailing_stop_trigger', 0)
                     info["trailing_stop_lock"] = getattr(s.instance, 'trailing_stop_lock', 0)

@@ -109,12 +109,8 @@ class MeanReversionStrategy(BaseStrategy):
             stop_loss = price * (1 + self.stop_loss_pct)
             take_profit = mean  # Target the mean
             
-            # Debug: Log values
-            print(f"[MeanReversion] SHORT signal: price={price:.2f}, mean={mean:.2f}, upper={upper_band:.2f}, SL={stop_loss:.2f}, TP={take_profit:.2f}")
-            
             # Validate: TP must be below entry for shorts
             if take_profit >= price:
-                print(f"[MeanReversion] Rejected: TP ({take_profit:.2f}) >= price ({price:.2f})")
                 return None
             
             # Check risk/reward ratio

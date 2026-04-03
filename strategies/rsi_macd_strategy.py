@@ -31,6 +31,8 @@ class RSIMACDStrategy(BaseStrategy):
     """
     
     name = "RSIMACDStrategy"
+    max_positions = 3  # Max 3 concurrent trades per strategy
+    max_positions_per_symbol = 1  # One trade per symbol
     
     def __init__(self, params: dict = None):
         super().__init__(params)
@@ -40,19 +42,20 @@ class RSIMACDStrategy(BaseStrategy):
         self.last_signal_time = {}
         self.prev_macd_hist = {}
         
-        # Parameters
+        # Parameters - More relaxed for forex
         self.rsi_period = self.params.get("rsi_period", 14)
-        self.rsi_oversold = self.params.get("rsi_oversold", 30)
-        self.rsi_overbought = self.params.get("rsi_overbought", 70)
+        self.rsi_oversold = self.params.get("rsi_oversold", 35)  # More relaxed
+        self.rsi_overbought = self.params.get("rsi_overbought", 65)  # More relaxed
         self.bb_period = self.params.get("bb_period", 20)
         self.bb_std = self.params.get("bb_std", 2.0)
+        self.bb_distance_threshold = self.params.get("bb_distance_threshold", 0.4)  # 40%
         
         # Risk management
-        self.stop_loss_pct = self.params.get("stop_loss_pct", 0.02)
-        self.take_profit_pct = self.params.get("take_profit_pct", 0.04)
+        self.stop_loss_pct = self.params.get("stop_loss_pct", 0.015)  # 1.5%
+        self.take_profit_pct = self.params.get("take_profit_pct", 0.03)  # 3% (2:1 R:R)
         
         # Cooldown
-        self.cooldown_minutes = self.params.get("cooldown_minutes", 3)
+        self.cooldown_minutes = self.params.get("cooldown_minutes", 5)
     
     def on_tick(self, symbol: str, price: float, timestamp: datetime) -> Optional[TradeSignal]:
         # Initialize per-symbol state
@@ -81,18 +84,21 @@ class RSIMACDStrategy(BaseStrategy):
         if None in (rsi, macd_hist, upper_bb):
             return None
         
-        # Track MACD histogram direction
-        macd_turning_up = self.prev_macd_hist[symbol] is not None and self.prev_macd_hist[symbol] < 0 and macd_hist > self.prev_macd_hist[symbol]
-        macd_turning_down = self.prev_macd_hist[symbol] is not None and self.prev_macd_hist[symbol] > 0 and macd_hist < self.prev_macd_hist[symbol]
+        # Track MACD histogram momentum (any positive/negative momentum)
+        prev_hist = self.prev_macd_hist[symbol]
+        macd_momentum_up = macd_hist > 0 and (prev_hist is None or macd_hist > prev_hist)
+        macd_momentum_down = macd_hist < 0 and (prev_hist is None or macd_hist < prev_hist)
         self.prev_macd_hist[symbol] = macd_hist
         
         # Calculate distance from Bollinger Bands
         bb_range = upper_bb - lower_bb
-        dist_from_lower = (price - lower_bb) / bb_range if bb_range > 0 else 0.5
-        dist_from_upper = (upper_bb - price) / bb_range if bb_range > 0 else 0.5
+        if bb_range == 0:
+            return None
+        dist_from_lower = (price - lower_bb) / bb_range
+        dist_from_upper = (upper_bb - price) / bb_range
         
-        # Long signal: RSI oversold + MACD turning up + near lower BB
-        if rsi < self.rsi_oversold and macd_turning_up and dist_from_lower < 0.3:
+        # Long signal: RSI oversold + MACD momentum up + near lower BB
+        if rsi < self.rsi_oversold and macd_momentum_up and dist_from_lower < self.bb_distance_threshold:
             self.last_signal_time[symbol] = timestamp
             confidence = 0.5 + (self.rsi_oversold - rsi) / 100 + (0.3 - dist_from_lower)
             
@@ -106,8 +112,8 @@ class RSIMACDStrategy(BaseStrategy):
                 reason=f"RSI oversold ({rsi:.1f}), MACD turning up, near lower BB"
             )
         
-        # Short signal: RSI overbought + MACD turning down + near upper BB
-        if rsi > self.rsi_overbought and macd_turning_down and dist_from_upper < 0.3:
+        # Short signal: RSI overbought + MACD momentum down + near upper BB
+        if rsi > self.rsi_overbought and macd_momentum_down and dist_from_upper < self.bb_distance_threshold:
             self.last_signal_time[symbol] = timestamp
             confidence = 0.5 + (rsi - self.rsi_overbought) / 100 + (0.3 - dist_from_upper)
             

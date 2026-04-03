@@ -100,6 +100,10 @@ class BrokerModeRequest(BaseModel):
     mode: str  # "paper" or "oanda"
 
 
+class ConfidenceThresholdRequest(BaseModel):
+    threshold: float
+
+
 class SymbolUnitsRequest(BaseModel):
     symbol: str
     units: Optional[float] = None  # None means use default (no trade if 0)
@@ -404,10 +408,16 @@ def cleanup_old_candles(days: int = Query(default=14, ge=1, le=60)):
 
 @app.get("/api/candles/count")
 def get_candle_count():
-    """Get total candle count in database."""
+    """Get total candle count and date range in database."""
     from candle_store import get_candle_store
     store = get_candle_store()
-    return {"count": store.get_candle_count()}
+    date_range = store.get_date_range()
+    return {
+        "count": date_range["total_candles"],
+        "oldest": date_range["oldest"],
+        "newest": date_range["newest"],
+        "retention_days": 14
+    }
 
 
 @app.post("/api/auto-trade")
@@ -435,14 +445,18 @@ def get_validator_mode():
 @app.get("/api/ai-confidence")
 def get_ai_confidence_threshold():
     """Get current AI confidence threshold for trade approval."""
+    # First try to load from Redis, then fallback to engine
+    saved_threshold = redis_client.get("ai_confidence_threshold")
+    if saved_threshold:
+        try:
+            return {"confidence_threshold": float(saved_threshold)}
+        except (ValueError, TypeError):
+            pass
+
     engine = get_engine()
     if engine.validator:
         return {"confidence_threshold": engine.validator.get_confidence_threshold()}
     return {"confidence_threshold": 0.75}
-
-
-class ConfidenceThresholdRequest(BaseModel):
-    threshold: float
 
 
 @app.post("/api/ai-confidence")
@@ -451,18 +465,28 @@ def set_ai_confidence_threshold(request: ConfidenceThresholdRequest):
     engine = get_engine()
     if not engine.validator:
         raise HTTPException(status_code=500, detail="AI validator not initialized")
-    
+
     # Validate range
     if request.threshold < 0.0 or request.threshold > 1.0:
         raise HTTPException(status_code=400, detail="Threshold must be between 0.0 and 1.0")
-    
+
     engine.validator.set_confidence_threshold(request.threshold)
+    # Persist to Redis
+    redis_client.set("ai_confidence_threshold", str(request.threshold))
     return {"confidence_threshold": request.threshold}
 
 
 @app.get("/api/ai-monitor-confidence")
 def get_ai_monitor_confidence():
     """Get current AI confidence threshold for position monitoring."""
+    # First try to load from Redis, then fallback to engine
+    saved_threshold = redis_client.get("ai_monitor_confidence_threshold")
+    if saved_threshold:
+        try:
+            return {"monitor_confidence": float(saved_threshold)}
+        except (ValueError, TypeError):
+            pass
+
     engine = get_engine()
     if engine.validator:
         return {"monitor_confidence": engine.validator.get_monitor_confidence_threshold()}
@@ -475,11 +499,13 @@ def set_ai_monitor_confidence(request: ConfidenceThresholdRequest):
     engine = get_engine()
     if not engine.validator:
         raise HTTPException(status_code=500, detail="AI validator not initialized")
-    
+
     if request.threshold < 0.0 or request.threshold > 1.0:
         raise HTTPException(status_code=400, detail="Threshold must be between 0.0 and 1.0")
-    
+
     engine.validator.set_monitor_confidence_threshold(request.threshold)
+    # Persist to Redis
+    redis_client.set("ai_monitor_confidence_threshold", str(request.threshold))
     return {"monitor_confidence": request.threshold}
 
 
@@ -488,13 +514,24 @@ def set_ai_monitor_confidence(request: ConfidenceThresholdRequest):
 @app.get("/api/ollama-mode")
 def get_ollama_mode():
     """Get current Ollama mode (auto, primary, backup) and status."""
-    from ai_trading.ai_client import get_ai_client
+    # Return persisted mode from Redis first
+    saved_mode = redis_client.get("ollama_mode")
+    mode = saved_mode.decode() if isinstance(saved_mode, bytes) else (saved_mode or "auto")
+    
+    # Try to get live status from client
+    using_backup = False
     try:
+        from ai_trading.ai_client import get_ai_client
         client = get_ai_client()
         status = client.get_current_ollama_status()
-        return status
-    except Exception as e:
-        return {"mode": "auto", "error": str(e)}
+        using_backup = status.get("using_backup", False)
+        # Use runtime mode if available, otherwise use persisted
+        if "mode" in status:
+            mode = status["mode"]
+    except Exception:
+        pass
+    
+    return {"mode": mode, "using_backup": using_backup, "persisted_mode": mode}
 
 
 class OllamaModeRequest(BaseModel):
@@ -505,15 +542,19 @@ class OllamaModeRequest(BaseModel):
 def set_ollama_mode(request: OllamaModeRequest):
     """Set Ollama mode: 'auto' (auto-failover), 'primary' (force localhost), 'backup' (force backup server)."""
     from ai_trading.ai_client import get_ai_client
-    
+
     if request.mode not in ("auto", "primary", "backup"):
         raise HTTPException(status_code=400, detail="Mode must be 'auto', 'primary', or 'backup'")
-    
+
     try:
         client = get_ai_client()
         client.set_force_ollama_mode(request.mode)
+        # Persist to Redis
+        redis_client.set("ollama_mode", request.mode)
         return {"mode": request.mode, "using_backup": client._using_backup}
     except Exception as e:
+        # Still save to Redis even if client fails
+        redis_client.set("ollama_mode", request.mode)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -521,41 +562,50 @@ def set_ollama_mode(request: OllamaModeRequest):
 
 @app.get("/api/monitor-ai-mode")
 def get_monitor_ai_mode():
-    """Get current monitor AI mode (cloud or local)."""
-    from ai_trading.ai_client import get_ai_client
+    """Get current monitor AI mode (cloud, local, or off)."""
+    # Return persisted mode from Redis - this is the source of truth
+    saved_mode = redis_client.get("monitor_ai_mode")
+    mode = saved_mode.decode() if isinstance(saved_mode, bytes) else (saved_mode or "cloud")
+    
+    # Get client info for model details
     try:
+        from ai_trading.ai_client import get_ai_client
         client = get_ai_client()
-        mode = client.get_monitor_ai_mode()
         return {
             "mode": mode,
-            "local_model": client._monitor_local_model,
-            "local_base": client._monitor_local_base
+            "local_model": getattr(client, '_monitor_local_model', 'qwen2.5:14b'),
+            "local_base": getattr(client, '_monitor_local_base', 'http://192.168.0.35:11434'),
+            "persisted_mode": mode
         }
-    except Exception as e:
-        return {"mode": "cloud", "error": str(e)}
+    except Exception:
+        return {"mode": mode, "persisted_mode": mode}
 
 
 class MonitorAIModeRequest(BaseModel):
-    mode: str  # "cloud" or "local"
+    mode: str  # "cloud", "local", or "off"
 
 
 @app.post("/api/monitor-ai-mode")
 def set_monitor_ai_mode(request: MonitorAIModeRequest):
-    """Set monitor AI mode: 'cloud' (default/backup) or 'local' (qwen2.5:14b localhost)."""
+    """Set monitor AI mode: 'cloud' (default/backup), 'local' (qwen2.5:14b localhost), or 'off' (disabled)."""
     from ai_trading.ai_client import get_ai_client
-    
-    if request.mode not in ("cloud", "local"):
-        raise HTTPException(status_code=400, detail="Mode must be 'cloud' or 'local'")
-    
+
+    if request.mode not in ("cloud", "local", "off"):
+        raise HTTPException(status_code=400, detail="Mode must be 'cloud', 'local', or 'off'")
+
     try:
         client = get_ai_client()
         client.set_monitor_ai_mode(request.mode)
+        # Persist to Redis
+        redis_client.set("monitor_ai_mode", request.mode)
         return {
             "mode": request.mode,
             "local_model": client._monitor_local_model,
             "local_base": client._monitor_local_base
         }
     except Exception as e:
+        # Still save to Redis even if client fails
+        redis_client.set("monitor_ai_mode", request.mode)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -708,6 +758,77 @@ def update_strategy_settings(name: str, settings: StrategySettingsRequest):
     }
 
 
+class StrategySymbolsRequest(BaseModel):
+    symbols: List[str]
+
+
+@app.get("/api/strategies/{name}/symbols")
+def get_strategy_symbols(name: str):
+    """Get the list of symbols a strategy is allowed to trade on."""
+    engine = get_engine()
+    loader = engine.strategy_loader
+    
+    with loader._lock:
+        if name not in loader.strategies:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        
+        strategy = loader.strategies[name]
+        
+        # Get saved symbol selections from Redis
+        saved_symbols = redis_client.smembers(f"strategy_symbols:{name}")
+        
+        # Get all active symbols from feed_config
+        all_symbols = get_active_symbols()
+        
+        return {
+            "name": name,
+            "all_symbols": all_symbols,
+            "selected_symbols": list(saved_symbols) if saved_symbols else [],
+            "uses_all_symbols": not saved_symbols or len(saved_symbols) == 0
+        }
+
+
+@app.post("/api/strategies/{name}/symbols")
+def update_strategy_symbols(name: str, request: StrategySymbolsRequest):
+    """Update the list of symbols a strategy is allowed to trade on."""
+    engine = get_engine()
+    loader = engine.strategy_loader
+    
+    with loader._lock:
+        if name not in loader.strategies:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        
+        strategy = loader.strategies[name]
+        if not strategy.instance:
+            raise HTTPException(status_code=400, detail="Strategy has no instance")
+        
+        # Validate symbols exist in feed_config
+        all_symbols = set(get_active_symbols())
+        valid_symbols = [s for s in request.symbols if s in all_symbols]
+        invalid_symbols = [s for s in request.symbols if s not in all_symbols]
+        
+        # Save to Redis as a set
+        redis_key = f"strategy_symbols:{name}"
+        
+        if valid_symbols:
+            # Clear existing and add new
+            redis_client.delete(redis_key)
+            redis_client.sadd(redis_key, *valid_symbols)
+            # Update the strategy instance
+            strategy.instance.symbols = valid_symbols
+        else:
+            # Empty list means use all symbols
+            redis_client.delete(redis_key)
+            strategy.instance.symbols = None
+        
+        return {
+            "name": name,
+            "symbols": valid_symbols,
+            "invalid_symbols": invalid_symbols,
+            "uses_all_symbols": not valid_symbols
+        }
+
+
 # === Trades ===
 
 @app.get("/api/trades")
@@ -852,78 +973,6 @@ def close_trade(trade_id: int, request: CloseTradeRequest = None):
 
 
 # === Trade Management ===
-
-@app.get("/api/positions")
-def get_open_positions_api():
-    """Get all open positions from OANDA."""
-    tm = get_trade_manager()
-    engine = get_engine()
-    
-    positions_list = []
-    
-    # Get OANDA positions
-    if engine.oanda_broker:
-        oanda_trades = engine.oanda_broker.get_open_trades()
-        
-        # Get strategy names from database for OANDA trades
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT symbol, strategy_name, metadata
-            FROM trades
-            WHERE status = 'open' AND strategy_name IS NOT NULL
-            ORDER BY entry_time DESC
-        """)
-        
-        # Build lookup by OANDA order ID and by symbol
-        strategy_lookup = {}
-        symbol_strategy = {}
-        
-        for row in cur.fetchall():
-            db_symbol, strategy_name, metadata = row
-            if metadata and isinstance(metadata, dict):
-                oanda_order_id = metadata.get('oanda_order_id')
-                if oanda_order_id:
-                    strategy_lookup[str(oanda_order_id)] = strategy_name
-            
-            # Keep most recent strategy per symbol as fallback
-            if db_symbol not in symbol_strategy:
-                symbol_strategy[db_symbol] = strategy_name
-        
-        cur.close()
-        conn.close()
-        
-        for t in oanda_trades:
-            # Convert instrument format (EUR_USD -> EURUSD)
-            symbol = t["instrument"].replace("_", "")
-            units = t["units"]
-            direction = "long" if units > 0 else "short"
-            
-            # Look up strategy name
-            strategy_name = strategy_lookup.get(str(t['id'])) or symbol_strategy.get(symbol) or "Manual/OANDA"
-            
-            positions_list.append({
-                "trade_id": f"oanda_{t['id']}",
-                "symbol": symbol,
-                "direction": direction,
-                "entry_price": t["price"],
-                "current_price": t["price"],  # Will be updated by price feed
-                "quantity": abs(units),
-                "stop_loss": float(t["stop_loss"]) if t.get("stop_loss") else None,
-                "take_profit": float(t["take_profit"]) if t.get("take_profit") else None,
-                "unrealized_pnl": t["unrealized_pnl"],
-                "unrealized_pnl_pct": (t["unrealized_pnl"] / (t["price"] * abs(units))) * 100 if t["price"] and units else 0,
-                "is_profitable": t["unrealized_pnl"] >= 0,
-                "opened_at": t["open_time"],
-                "strategy_name": strategy_name,
-                "broker": "oanda"
-            })
-    
-    return {
-        "positions": positions_list,
-        "summary": {"total_positions": len(positions_list), "total_unrealized_pnl": sum(p["unrealized_pnl"] for p in positions_list)}
-    }
-
 
 @app.post("/api/trades/{trade_id}/move-stop")
 def move_stop_loss(trade_id: int, request: MoveStopRequest):
@@ -1095,9 +1144,20 @@ def clear_all_history():
 
 # === Positions ===
 
+def _get_monitor_confidence(trade_id: str) -> Optional[dict]:
+    """Get last AI monitor result for a trade from Redis."""
+    try:
+        data = redis_client.get(f"monitor_result:{trade_id}")
+        if data:
+            import json
+            return json.loads(data)
+    except Exception:
+        pass
+    return None
+
 @app.get("/api/positions")
 def get_positions():
-    """Get all open positions from OANDA."""
+    """Get all open positions from OANDA and database."""
     positions = []
     summary = {
         "total_positions": 0,
@@ -1111,54 +1171,60 @@ def get_positions():
     try:
         broker = get_oanda_broker()
         if broker.connected:
-            oanda_positions = broker.get_all_positions()
-            for symbol, pos in oanda_positions.items():
-                # Get current price from Redis
-                current_price = pos.get("avg_price", 0)
-                unrealized_pnl = pos.get("unrealized_pnl", 0)
-                direction = pos.get("side", "long").lower()
-                # Calculate entry price based on unrealized P&L direction
-                entry_adjustment = unrealized_pnl / pos["units"] if pos["units"] != 0 else 0
-                entry_price = pos["avg_price"] - entry_adjustment if direction == "long" else pos["avg_price"] + entry_adjustment
-
-                positions.append({
-                    "trade_id": f"oanda_{symbol}",
-                    "symbol": symbol,
-                    "direction": direction,
-                    "entry_price": pos["avg_price"],
-                    "current_price": current_price,
-                    "quantity": pos["units"],
-                    "stop_loss": None,
-                    "take_profit": None,
-                    "unrealized_pnl": unrealized_pnl,
-                    "unrealized_pnl_pct": (unrealized_pnl / (pos["avg_price"] * pos["units"]) * 100) if pos["units"] > 0 else 0,
-                    "strategy_name": "OANDA",
-                    "broker": "oanda",
-                    "opened_at": None
-                })
-
-            # Also get open trades that might not be in positions
+            # Get open trades from OANDA
             oanda_trades = broker.get_open_trades()
+            
+            # Get strategy names from database for OANDA trades
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT symbol, strategy_name, metadata
+                FROM trades
+                WHERE status = 'open' AND strategy_name IS NOT NULL
+                ORDER BY entry_time DESC
+            """)
+            
+            strategy_lookup = {}
+            symbol_strategy = {}
+            
+            for row in cur.fetchall():
+                db_symbol, strat_name, meta = row
+                if meta and isinstance(meta, dict):
+                    oanda_order_id = meta.get('oanda_order_id')
+                    if oanda_order_id:
+                        strategy_lookup[str(oanda_order_id)] = strat_name
+                
+                if db_symbol not in symbol_strategy:
+                    symbol_strategy[db_symbol] = strat_name
+            
+            cur.close()
+            conn.close()
+            
             for trade in oanda_trades:
                 symbol = trade.get("instrument", "").replace("_", "")
-                # Check if already in positions
-                existing = [p for p in positions if p["symbol"] == symbol and p["broker"] == "oanda"]
-                if not existing:
-                    positions.append({
-                        "trade_id": f"oanda_trade_{trade.get('id')}",
-                        "symbol": symbol,
-                        "direction": "long" if int(float(trade.get("units", 0))) > 0 else "short",
-                        "entry_price": trade.get("price", 0),
-                        "current_price": trade.get("price", 0),
-                        "quantity": abs(int(float(trade.get("units", 0)))),
-                        "stop_loss": trade.get("stop_loss"),
-                        "take_profit": trade.get("take_profit"),
-                        "unrealized_pnl": trade.get("unrealized_pnl", 0),
-                        "unrealized_pnl_pct": 0,
-                        "strategy_name": "OANDA",
-                        "broker": "oanda",
-                        "opened_at": trade.get("open_time")
-                    })
+                units = int(float(trade.get("units", 0)))
+                direction = "long" if units > 0 else "short"
+                strategy_name = strategy_lookup.get(str(trade['id'])) or symbol_strategy.get(symbol) or "Manual/OANDA"
+                
+                positions.append({
+                    "trade_id": f"oanda_trade_{trade.get('id')}",
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry_price": float(trade.get("price", 0)),
+                    "current_price": float(trade.get("price", 0)),
+                    "quantity": abs(units),
+                    "stop_loss": float(trade.get("stop_loss")) if trade.get("stop_loss") else None,
+                    "take_profit": float(trade.get("take_profit")) if trade.get("take_profit") else None,
+                    "unrealized_pnl": float(trade.get("unrealized_pnl", 0)),
+                    "unrealized_pnl_pct": (float(trade.get("unrealized_pnl", 0)) / (float(trade.get("price", 1)) * abs(units))) * 100 if trade.get("price") and units else 0,
+                    "strategy_name": strategy_name,
+                    "broker": "oanda",
+                    "opened_at": trade.get("open_time"),
+                    "trailing_stop_trigger": None,
+                    "trailing_stop_lock": None,
+                    "trailing_stop_activated": False,
+                    "ai_monitor": _get_monitor_confidence(f"oanda_trade_{trade.get('id')}")
+                })
     except Exception as e:
         print(f"[API] Error getting OANDA positions: {e}")
 
@@ -1363,6 +1429,16 @@ def list_logs():
 @app.get("/api/screenshots/status")
 def get_screenshots_status():
     """Get current screenshot enabled status."""
+    # Read from Redis first, fall back to engine service
+    try:
+        saved = redis_client.get("screenshots_enabled")
+        if saved is not None:
+            enabled = saved.decode() if isinstance(saved, bytes) else saved
+            return {"enabled": enabled == "1" or enabled == "True"}
+    except Exception:
+        pass
+    
+    # Fall back to engine service
     engine = get_engine()
     return {"enabled": engine.screenshot_service.is_enabled()}
 
@@ -1570,15 +1646,34 @@ def get_oanda_trade_history(limit: int = Query(default=50, le=100)):
                             instrument = tx.get("instrument", "")
                             symbol = instrument.replace("_", "")
                             units_int = int(float(units))
+                            
+                            # For ORDER_FILL with P&L, the price is the EXIT price
+                            exit_price = float(tx.get("price", 0))
+                            
+                            # Calculate entry price from P&L and exit price
+                            # P&L = (exit - entry) * units for long, (entry - exit) * units for short
+                            pnl = float(pl)
+                            units_abs = abs(units_int)
+                            
+                            if units_abs > 0:
+                                if units_int > 0:  # Long position
+                                    # pnl = (exit - entry) * units
+                                    entry_price = exit_price - (pnl / units_abs)
+                                else:  # Short position
+                                    # pnl = (entry - exit) * units
+                                    entry_price = exit_price + (pnl / units_abs)
+                            else:
+                                entry_price = exit_price
 
                             trades.append({
                                 "id": tx.get("id"),
                                 "symbol": symbol,
                                 "instrument": instrument,
-                                "units": abs(units_int),
+                                "units": units_abs,
                                 "direction": "long" if units_int > 0 else "short",
-                                "entry_price": float(tx.get("price", 0)),
-                                "realized_pnl": float(pl),
+                                "entry_price": entry_price,
+                                "exit_price": exit_price,
+                                "realized_pnl": pnl,
                                 "time": tx.get("time"),
                                 "reason": tx.get("reason", "CLOSE")
                             })

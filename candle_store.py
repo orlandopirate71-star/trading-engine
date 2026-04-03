@@ -141,6 +141,60 @@ class CandleStore:
                 print(f"[CandleStore] Cleanup error: {e}")
                 return 0
 
+    def cleanup_single_day(self, days_to_keep: int = 14):
+        """
+        Delete exactly one day of old candles (the day that's days_to_keep+1 days old).
+        This maintains a rolling 14-day window where we delete only the oldest day each run.
+        
+        Example: With days_to_keep=14, we delete candles from 15 days ago,
+        keeping candles from day 14 through today.
+        """
+        with self._lock:
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                
+                # Calculate the day to delete (e.g., 15 days ago)
+                now = datetime.utcnow()
+                delete_day_start = now - timedelta(days=days_to_keep + 1)
+                delete_day_end = delete_day_start + timedelta(days=1)
+                
+                cur.execute("""
+                    DELETE FROM market_candles 
+                    WHERE timestamp >= %s AND timestamp < %s
+                """, (delete_day_start, delete_day_end))
+                deleted = cur.rowcount
+                conn.commit()
+                cur.close()
+                conn.close()
+                if deleted > 0:
+                    print(f"[CandleStore] Deleted {deleted} candles from {delete_day_start.date()} (rolling retention)")
+                return deleted
+            except Exception as e:
+                print(f"[CandleStore] Daily cleanup error: {e}")
+                return 0
+
+    def get_date_range(self) -> dict:
+        """Get the date range of candles in the database."""
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT MIN(timestamp), MAX(timestamp), COUNT(*) 
+                FROM market_candles
+            """)
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            return {
+                "oldest": row[0].isoformat() if row[0] else None,
+                "newest": row[1].isoformat() if row[1] else None,
+                "total_candles": row[2] or 0
+            }
+        except Exception as e:
+            print(f"[CandleStore] Failed to get date range: {e}")
+            return {"oldest": None, "newest": None, "total_candles": 0}
+
     def get_candle_count(self) -> int:
         """Get total candle count in database."""
         try:

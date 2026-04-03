@@ -291,3 +291,7 @@ class BreakoutPullbackStrategy(BaseStrategy):
             )
         
         return None
+
+
+# Alias for strategy loader
+BreakoutPullback = BreakoutPullbackStrategy

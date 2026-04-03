@@ -241,3 +241,7 @@ class OrderBlockStrategy(BaseStrategy):
                 )
         
         return None
+
+
+# Alias for strategy loader
+OrderBlock = OrderBlockStrategy

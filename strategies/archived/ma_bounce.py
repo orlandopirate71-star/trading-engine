@@ -183,3 +183,7 @@ class MABounceStrategy(BaseStrategy):
                 self.touched_ema = False
         
         return None
+
+
+# Alias for strategy loader
+MABounce = MABounceStrategy

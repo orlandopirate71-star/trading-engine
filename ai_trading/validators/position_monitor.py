@@ -230,10 +230,25 @@ class PositionMonitor:
         # Get current AIClient to ensure we have latest mode setting
         from ai_trading.ai_client import get_ai_client
         current_ai = get_ai_client()
-        using_local = getattr(current_ai, '_monitor_ai_mode', 'cloud') == 'local'
-        
-        # Debug logging
         mode_value = getattr(current_ai, '_monitor_ai_mode', 'cloud')
+        
+        # If monitoring is disabled, return HOLD without AI analysis
+        if mode_value == 'off':
+            print(f"[PositionMonitor] Monitoring disabled (mode=off) - skipping {position.get('symbol')}")
+            return MonitorResult(
+                action=PositionAction.HOLD,
+                confidence=0.0,
+                reasoning="Monitoring disabled",
+                urgency="low",
+                new_stop_loss=None,
+                new_take_profit=None,
+                close_percentage=0.0,
+                warnings=[],
+                latency_ms=(time.time() - start_time) * 1000,
+                provider="disabled"
+            )
+        
+        using_local = mode_value == 'local'
         local_base = getattr(current_ai, '_monitor_local_base', 'N/A')
         print(f"[PositionMonitor] AI mode check: _monitor_ai_mode={mode_value}, using_local={using_local}, local_base={local_base}")
         

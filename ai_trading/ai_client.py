@@ -317,11 +317,12 @@ class AIClient:
         }
 
     def set_monitor_ai_mode(self, mode: str):
-        """Set monitor AI mode: 'cloud' (default/backup) or 'local' (qwen2.5:14b)."""
-        if mode not in ("cloud", "local"):
-            raise ValueError("Mode must be 'cloud' or 'local'")
+        """Set monitor AI mode: 'cloud' (default/backup), 'local' (qwen2.5:14b), or 'off' (disabled)."""
+        if mode not in ("cloud", "local", "off"):
+            raise ValueError("Mode must be 'cloud', 'local', or 'off'")
+        old_mode = self._monitor_ai_mode
         self._monitor_ai_mode = mode
-        print(f"[AI] Monitor AI mode set to: {mode}")
+        print(f"[AI] Monitor AI mode changed: {old_mode} -> {mode}")
 
     def get_monitor_ai_mode(self) -> str:
         """Get current monitor AI mode."""
@@ -365,6 +366,20 @@ def get_ai_client() -> AIClient:
     global _ai_client
     if _ai_client is None:
         _ai_client = AIClient()
+        # Load monitor mode from Redis if available
+        try:
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from connections import redis_client
+            
+            saved_monitor_mode = redis_client.get("monitor_ai_mode")
+            if saved_monitor_mode:
+                mode = saved_monitor_mode.decode() if isinstance(saved_monitor_mode, bytes) else saved_monitor_mode
+                if mode in ("cloud", "local", "off"):
+                    _ai_client._monitor_ai_mode = mode
+        except Exception:
+            pass
     return _ai_client
 
 
@@ -374,5 +389,41 @@ def init_ai_client(
 ) -> AIClient:
     """Initialize the AI client with settings."""
     global _ai_client
+    
+    # Preserve existing monitor mode if client already exists
+    existing_monitor_mode = None
+    if _ai_client is not None:
+        existing_monitor_mode = _ai_client._monitor_ai_mode
+    
     _ai_client = AIClient(primary=primary, **kwargs)
+
+    # Load persisted settings from Redis
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from connections import redis_client
+
+        # Load Ollama mode
+        saved_ollama_mode = redis_client.get("ollama_mode")
+        if saved_ollama_mode:
+            mode = saved_ollama_mode.decode() if isinstance(saved_ollama_mode, bytes) else saved_ollama_mode
+            if mode in ("auto", "primary", "backup"):
+                _ai_client._force_ollama_mode = mode
+                print(f"[AI Client] Loaded Ollama mode: {mode}")
+
+        # Load Monitor AI mode - prefer Redis, then existing, then default
+        saved_monitor_mode = redis_client.get("monitor_ai_mode")
+        if saved_monitor_mode:
+            mode = saved_monitor_mode.decode() if isinstance(saved_monitor_mode, bytes) else saved_monitor_mode
+            if mode in ("cloud", "local", "off"):
+                _ai_client._monitor_ai_mode = mode
+                print(f"[AI Client] Loaded Monitor AI mode: {mode}")
+        elif existing_monitor_mode and existing_monitor_mode in ("cloud", "local", "off"):
+            # Preserve existing mode if no Redis value
+            _ai_client._monitor_ai_mode = existing_monitor_mode
+            print(f"[AI Client] Preserved Monitor AI mode: {existing_monitor_mode}")
+    except Exception as e:
+        print(f"[AI Client] Could not load persisted settings: {e}")
+
     return _ai_client

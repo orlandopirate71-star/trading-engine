@@ -89,6 +89,41 @@ fi
 
 # Launch dashboard in dedicated browser window
 echo -e "${YELLOW}Opening dashboard in Chromium...${NC}"
+
+# Wait for API to be fully ready and settings loaded
+echo -e "${YELLOW}Waiting for API to be ready...${NC}"
+for i in {1..30}; do
+    if curl -s http://localhost:8000/api/system/status > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ API is ready${NC}"
+        # Give API time to finish loading persisted settings
+        sleep 3
+        break
+    fi
+    sleep 1
+done
+
+# Wait for feeds to publish prices (symbols won't show without this)
+echo -e "${YELLOW}Waiting for feeds to publish prices...${NC}"
+for i in {1..20}; do
+    if redis-cli hlen latest_prices 2>/dev/null | grep -qv "^0$"; then
+        echo -e "${GREEN}✓ Prices available${NC}"
+        break
+    fi
+    sleep 1
+done
+
+# Wait for dashboard Vite server to be ready
+echo -e "${YELLOW}Waiting for dashboard server...${NC}"
+for i in {1..30}; do
+    if curl -s http://localhost:3000 > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Dashboard server ready${NC}"
+        # Give it an extra second to fully initialize
+        sleep 2
+        break
+    fi
+    sleep 1
+done
+
 chromium-browser --app=http://localhost:3000 \
     --window-size=1920,1080 \
     --disable-extensions \

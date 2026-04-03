@@ -363,6 +363,21 @@ class TradingEngine:
                 }
                 redis_client.lpush("ai_activity_log", json.dumps(event))
                 redis_client.ltrim("ai_activity_log", 0, 499)
+                
+                # Store last monitor result for this trade (for dashboard display)
+                trade_id = position.get('trade_id')
+                if trade_id:
+                    redis_client.setex(
+                        f"monitor_result:{trade_id}",
+                        3600,  # Expire after 1 hour
+                        json.dumps({
+                            "action": action,
+                            "confidence": result.confidence,
+                            "urgency": result.urgency,
+                            "reasoning": result.reasoning[:200],
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                    )
             except Exception as log_err:
                 pass  # Don't fail for logging errors
 
@@ -462,12 +477,13 @@ class TradingEngine:
                     print(f"[ENGINE] OANDA sync error: {e}")
 
     def _candle_cleanup_loop(self):
-        """Background thread to periodically clean up old candles."""
+        """Background thread to clean up one day of old candles every 24 hours (rolling 14-day window)."""
         while self.running:
             time.sleep(86400)  # Run once per day
             if self.running:
                 try:
-                    self.candle_store.cleanup_old_candles(days=14)
+                    # Delete exactly 1 day of old candles (15 days ago), keeping 14 days
+                    self.candle_store.cleanup_single_day(days_to_keep=14)
                 except Exception as e:
                     print(f"[ENGINE] Candle cleanup error: {e}")
     

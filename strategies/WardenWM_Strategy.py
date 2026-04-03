@@ -61,9 +61,9 @@ class WardenWM(BaseStrategy):
         if not warden_tf or warden_tf not in WARDEN_WM_SETTINGS:
             return None
         
-        # Get last 250 candles for calculations
-        candles = history.get_candles(250)
-        if len(candles) < 220:
+        # Get last 150 candles for calculations
+        candles = history.get_candles(150)
+        if len(candles) < 120:
             return None
         
         # Convert to DataFrame for WardenWM

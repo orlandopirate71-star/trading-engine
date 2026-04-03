@@ -332,4 +332,25 @@ def init_ai_validator(
         require_approval=require_approval,
         ollama_model=ollama_model
     )
+
+    # Load persisted confidence thresholds from Redis
+    try:
+        from connections import redis_client
+
+        # Load signal confidence threshold
+        saved_confidence = redis_client.get("ai_confidence_threshold")
+        if saved_confidence:
+            threshold = float(saved_confidence.decode() if isinstance(saved_confidence, bytes) else saved_confidence)
+            _validator.set_confidence_threshold(threshold)
+            print(f"[AI Validator] Loaded confidence threshold: {threshold}")
+
+        # Load monitor confidence threshold
+        saved_monitor = redis_client.get("ai_monitor_confidence_threshold")
+        if saved_monitor:
+            threshold = float(saved_monitor.decode() if isinstance(saved_monitor, bytes) else saved_monitor)
+            _validator.set_monitor_confidence_threshold(threshold)
+            print(f"[AI Validator] Loaded monitor confidence threshold: {threshold}")
+    except Exception as e:
+        print(f"[AI Validator] Could not load persisted thresholds: {e}")
+
     return _validator
