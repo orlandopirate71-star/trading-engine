@@ -10,10 +10,12 @@ import {
   CheckCircle,
   Clock,
   Globe,
-  Moon
+  Moon,
+  Database
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import SystemStatus from '../components/SystemStatus'
+import VolatilityStatus from '../components/VolatilityStatus'
 
 const getTradingSession = () => {
   const utcHour = new Date().getUTCHours()
@@ -40,14 +42,24 @@ const StatCard = ({ title, value, icon: Icon, color, subtext }) => (
 const RecentTrade = ({ trade }) => {
   const isWin = trade.pnl > 0
   const isPending = trade.status === 'pending' || trade.status === 'approved'
+  const isOpen = trade.status === 'open'
+  
+  // Format duration or exit time
+  const getExitInfo = () => {
+    if (trade.exit_time) {
+      return new Date(trade.exit_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    }
+    return null
+  }
 
   return (
     <Link
       to={`/trades/${trade.id}`}
-      className="flex items-center justify-between p-2 bg-gray-800 rounded hover:bg-gray-750 transition-colors"
+      className="flex items-center justify-between p-2 bg-gray-800 rounded hover:bg-gray-750 transition-colors text-xs"
     >
-      <div className="flex items-center gap-2">
-        <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        {/* Direction + Symbol + Strategy */}
+        <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
           trade.direction === 'long' ? 'bg-green-900' : 'bg-red-900'
         }`}>
           {trade.direction === 'long' ?
@@ -55,29 +67,51 @@ const RecentTrade = ({ trade }) => {
             <TrendingDown className="text-red-400" size={12} />
           }
         </div>
-        <div>
-          <div className="font-medium text-xs">{trade.symbol}</div>
-          <div className="text-xs text-gray-400">{trade.strategy_name}</div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{trade.symbol}</span>
+            <span className="text-yellow-400 text-[10px] truncate">{trade.strategy_name}</span>
+          </div>
+          {/* Trade Details Line */}
+          <div className="flex items-center gap-2 text-[10px] text-gray-400">
+            <span>E:{trade.entry_price?.toFixed(trade.symbol?.includes('JPY') ? 3 : 5)}</span>
+            {trade.exit_price && (
+              <span>X:{trade.exit_price?.toFixed(trade.symbol?.includes('JPY') ? 3 : 5)}</span>
+            )}
+            {trade.stop_loss && (
+              <span className="text-red-400">SL:{trade.stop_loss?.toFixed(trade.symbol?.includes('JPY') ? 3 : 5)}</span>
+            )}
+            {trade.take_profit && (
+              <span className="text-green-400">TP:{trade.take_profit?.toFixed(trade.symbol?.includes('JPY') ? 3 : 5)}</span>
+            )}
+          </div>
         </div>
       </div>
-      <div className="text-right">
+      
+      {/* Right: Status/P&L + Exit Time */}
+      <div className="text-right flex-shrink-0">
         {trade.status === 'closed' ? (
           <>
-            <div className={`font-mono font-bold text-xs ${isWin ? 'text-green-400' : 'text-red-400'}`}>
-              {isWin ? '+' : ''}{trade.pnl?.toFixed(4)}
+            <div className={`font-mono font-bold ${isWin ? 'text-green-400' : 'text-red-400'}`}>
+              {isWin ? '+' : ''}{trade.pnl?.toFixed(2)}
             </div>
-            <div className="text-xs text-gray-400">
-              {trade.pnl_percent?.toFixed(2)}%
+            <div className="text-[10px] text-gray-500">
+              {getExitInfo()}
             </div>
           </>
         ) : (
-          <div className={`flex items-center gap-1 text-xs ${
+          <div className={`flex flex-col items-end ${
             trade.status === 'approved' ? 'text-yellow-400' :
             trade.status === 'open' ? 'text-blue-400' : 'text-gray-400'
           }`}>
-            {trade.status === 'approved' && <Clock size={12} />}
-            {trade.status === 'open' && <Activity size={12} />}
-            <span className="capitalize">{trade.status}</span>
+            <div className="flex items-center gap-1">
+              {trade.status === 'approved' && <Clock size={12} />}
+              {trade.status === 'open' && <Activity size={12} />}
+              <span className="capitalize">{trade.status}</span>
+            </div>
+            {isOpen && trade.quantity && (
+              <span className="text-[10px] text-gray-500">{trade.quantity} units</span>
+            )}
           </div>
         )}
       </div>
@@ -131,15 +165,18 @@ export default function Dashboard({ status }) {
   const [brokerInfo, setBrokerInfo] = useState(null)
   const [oandaAccount, setOandaAccount] = useState(null)
 
+  const [candleInfo, setCandleInfo] = useState(null)
+
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [tradesRes, positionsRes, perfRes, balanceRes, brokerRes] = await Promise.all([
+        const [tradesRes, positionsRes, perfRes, balanceRes, brokerRes, candleRes] = await Promise.all([
           fetch('/api/trades?limit=10'),
           fetch('/api/positions'),
           fetch('/api/performance?days=7'),
           fetch('/api/balance'),
-          fetch('/api/broker')
+          fetch('/api/broker'),
+          fetch('/api/candles/count')
         ])
         
         setTrades((await tradesRes.json()).trades)
@@ -147,6 +184,7 @@ export default function Dashboard({ status }) {
         setPositions(posData.positions || [])
         setPerformance(await perfRes.json())
         setBalance(await balanceRes.json())
+        setCandleInfo(await candleRes.json())
         
         const broker = await brokerRes.json()
         setBrokerInfo(broker)
@@ -182,6 +220,7 @@ export default function Dashboard({ status }) {
   return (
     <div className="p-6 space-y-6">
       <SystemStatus />
+      <VolatilityStatus />
 
       {/* Market Status Banner */}
       {!marketOpen && (
@@ -304,6 +343,13 @@ export default function Dashboard({ status }) {
           icon={Activity}
           color="text-yellow-400"
           subtext={`${status?.pending_trades || 0} pending`}
+        />
+        <StatCard
+          title="Candle Database"
+          value={candleInfo ? `${candleInfo.count?.toLocaleString() || 0}` : '-'}
+          icon={Database}
+          color="text-purple-400"
+          subtext={candleInfo?.oldest ? `${new Date(candleInfo.oldest).toLocaleDateString()} - ${new Date(candleInfo.newest).toLocaleDateString()}` : 'Loading...'}
         />
       </div>
 

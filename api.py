@@ -93,7 +93,16 @@ class OandaOrderRequest(BaseModel):
     symbol: str
     side: str  # BUY or SELL
     units: int
-    stop_loss: Optional[float] = None
+
+class VolatilityConfigRequest(BaseModel):
+    low_threshold: Optional[float] = None  # Global low threshold (ATR%)
+    high_threshold: Optional[float] = None  # Global high threshold (ATR%)
+    symbol_thresholds: Optional[dict] = None  # Per-symbol: {"EURUSD": {"low": 0.01, "high": 0.02}}
+    enabled: Optional[bool] = None
+    refresh_interval: Optional[int] = None  # seconds between volatility checks
+
+class VolatilityOverrideRequest(BaseModel):
+    enabled: bool  # Manual override for trading allowed/blocked
     take_profit: Optional[float] = None
 
 class BrokerModeRequest(BaseModel):
@@ -417,6 +426,326 @@ def get_candle_count():
         "oldest": date_range["oldest"],
         "newest": date_range["newest"],
         "retention_days": 14
+    }
+
+
+# === Volatility Switch ===
+
+# Default per-symbol thresholds (M15 ATR%)
+DEFAULT_VOLATILITY_THRESHOLDS = {
+    "AUDUSD": {"low": 0.030, "high": 0.042},
+    "EURGBP": {"low": 0.017, "high": 0.023},
+    "EURJPY": {"low": 0.020, "high": 0.034},
+    "EURUSD": {"low": 0.014, "high": 0.026},
+    "GBPJPY": {"low": 0.024, "high": 0.038},
+    "GBPUSD": {"low": 0.022, "high": 0.033},
+    "NZDUSD": {"low": 0.030, "high": 0.038},
+    "USDCAD": {"low": 0.012, "high": 0.019},
+    "USDCHF": {"low": 0.022, "high": 0.035},
+    "USDJPY": {"low": 0.015, "high": 0.039},
+    "XAGUSD": {"low": 0.107, "high": 0.305},
+    "XAUUSD": {"low": 0.082, "high": 0.259},
+}
+
+
+def calculate_atr_percent(symbol: str, period: int = 14, timeframe: str = "M15") -> Optional[float]:
+    """
+    Calculate ATR as a percentage of current price.
+    Returns ATR% which allows comparison across different price levels.
+    Uses M15 by default for better volatility representation.
+    """
+    try:
+        from candle_store import get_candle_store
+        store = get_candle_store()
+        candles = store.get_recent_candles(symbol, timeframe, count=period + 2)
+        if not candles or len(candles) < period + 1:
+            return None
+
+        # Calculate True Range
+        tr_values = []
+        for i in range(1, len(candles)):
+            high = candles[i]['high']
+            low = candles[i]['low']
+            prev_close = candles[i-1]['close']
+
+            tr = max(
+                high - low,
+                abs(high - prev_close),
+                abs(low - prev_close)
+            )
+            tr_values.append(tr)
+
+        if len(tr_values) < period:
+            return None
+
+        # ATR = smoothed average of TR (simple average for now)
+        atr = sum(tr_values[-period:]) / period
+        current_price = candles[-1]['close']
+
+        if current_price == 0:
+            return None
+
+        # ATR as percentage of price
+        return (atr / current_price) * 100
+
+    except Exception as e:
+        print(f"[Volatility] Error calculating ATR for {symbol}: {e}")
+        return None
+
+
+def get_volatility_thresholds(symbol: str) -> dict:
+    """
+    Get volatility thresholds for a specific symbol.
+    Tries Redis first, then falls back to defaults.
+    """
+    # Check Redis for custom threshold
+    redis_key = f"volatility_threshold:{symbol}"
+    saved = redis_client.hgetall(redis_key)
+
+    # Check for global defaults in Redis
+    global_low = redis_client.get("volatility_low_threshold")
+    global_high = redis_client.get("volatility_high_threshold")
+
+    # Use default thresholds for this symbol
+    default = DEFAULT_VOLATILITY_THRESHOLDS.get(symbol, {"low": 0.02, "high": 0.05})
+
+    return {
+        "low": float(saved.get("low", global_low)) if global_low else default["low"],
+        "high": float(saved.get("high", global_high)) if global_high else default["high"]
+    }
+
+
+def get_symbol_volatility(symbol: str) -> dict:
+    """
+    Get volatility status for a specific symbol.
+    """
+    atr_pct = calculate_atr_percent(symbol, period=14)
+    thresholds = get_volatility_thresholds(symbol)
+
+    if atr_pct is None:
+        return {
+            "symbol": symbol,
+            "atr_percent": None,
+            "status": "unknown",
+            "trading_allowed": True,  # Default to allowing if we can't calculate
+            "thresholds": thresholds,
+            "error": "Not enough candle data"
+        }
+
+    if atr_pct < thresholds["low"]:
+        status = "low"
+        allowed = False
+    elif atr_pct < thresholds["high"]:
+        status = "caution"
+        allowed = True
+    else:
+        status = "high"
+        allowed = True
+
+    # Check for manual override
+    override = redis_client.get("volatility_override")
+    if override == "disabled":
+        allowed = False
+        status = "manual_off"
+    elif override == "enabled":
+        allowed = True
+        status = "manual_on"
+
+    return {
+        "symbol": symbol,
+        "atr_percent": round(atr_pct, 4),
+        "status": status,
+        "trading_allowed": allowed,
+        "thresholds": thresholds,
+        "last_updated": datetime.utcnow().isoformat()
+    }
+
+
+def get_market_volatility() -> dict:
+    """
+    Calculate aggregate market volatility across all active symbols.
+    Uses per-symbol thresholds for more accurate trading decisions.
+    Returns dict with current volatility status and per-symbol data.
+    """
+    from feed_symbols import get_active_symbols
+
+    active_symbols = get_active_symbols()
+    symbol_results = {}
+    allowed_count = 0
+    blocked_count = 0
+
+    for symbol in active_symbols:
+        result = get_symbol_volatility(symbol)
+        symbol_results[symbol] = result
+        if result["atr_percent"] is not None:
+            if result["trading_allowed"]:
+                allowed_count += 1
+            else:
+                blocked_count += 1
+
+    # Overall status
+    total_tracked = allowed_count + blocked_count
+    if total_tracked == 0:
+        overall_status = "unknown"
+        trading_allowed = True
+    elif blocked_count == total_tracked:
+        overall_status = "all_low"
+        trading_allowed = False
+    elif blocked_count > allowed_count:
+        overall_status = "mostly_low"
+        trading_allowed = False
+    else:
+        overall_status = "sufficient"
+        trading_allowed = True
+
+    # Check for manual override
+    override = redis_client.get("volatility_override")
+    if override in ("enabled", "disabled"):
+        trading_allowed = override == "enabled"
+        overall_status = f"manual_{'on' if override == 'enabled' else 'off'}"
+
+    return {
+        "status": overall_status,
+        "trading_allowed": trading_allowed,
+        "symbols_allowed": allowed_count,
+        "symbols_blocked": blocked_count,
+        "total_symbols": len(active_symbols),
+        "symbols": symbol_results,
+        "volatility_enabled": redis_client.get("volatility_enabled") != "false",
+        "manual_override": override in ("enabled", "disabled"),
+        "last_updated": datetime.utcnow().isoformat()
+    }
+
+
+def _get_volatility_thresholds() -> dict:
+    """Get global volatility thresholds (fallback)."""
+    return {
+        "low_threshold": float(redis_client.get("volatility_low_threshold") or 0.04),
+        "high_threshold": float(redis_client.get("volatility_high_threshold") or 0.08),
+        "enabled": redis_client.get("volatility_enabled") != "false"
+    }
+
+
+@app.get("/api/volatility")
+def get_volatility():
+    """
+    Get current market volatility status.
+    Used by dashboard to display volatility gauge and trading status.
+    """
+    return get_market_volatility()
+
+
+@app.get("/api/volatility/config")
+def get_volatility_config():
+    """Get volatility configuration (thresholds, enabled state)."""
+    thresholds = _get_volatility_thresholds()
+    override = redis_client.get("volatility_override")
+    return {
+        "low_threshold": thresholds["low_threshold"],
+        "high_threshold": thresholds["high_threshold"],
+        "enabled": thresholds["enabled"],
+        "manual_override": override in ("enabled", "disabled"),
+        "override_active": override is not None
+    }
+
+
+@app.post("/api/volatility/config")
+def set_volatility_config(request: VolatilityConfigRequest):
+    """Configure volatility thresholds and enabled state."""
+    if request.low_threshold is not None:
+        if not 0 <= request.low_threshold <= 10:
+            raise HTTPException(status_code=400, detail="low_threshold must be 0-10")
+        redis_client.set("volatility_low_threshold", str(request.low_threshold))
+
+    if request.high_threshold is not None:
+        if not 0 <= request.high_threshold <= 10:
+            raise HTTPException(status_code=400, detail="high_threshold must be 0-10")
+        redis_client.set("volatility_high_threshold", str(request.high_threshold))
+
+    # Handle per-symbol thresholds
+    if request.symbol_thresholds is not None:
+        for symbol, thresholds in request.symbol_thresholds.items():
+            if isinstance(thresholds, dict):
+                low = thresholds.get("low", thresholds.get("low_threshold"))
+                high = thresholds.get("high", thresholds.get("high_threshold"))
+                redis_key = f"volatility_threshold:{symbol}"
+                if low is not None:
+                    redis_client.hset(redis_key, "low", str(low))
+                if high is not None:
+                    redis_client.hset(redis_key, "high", str(high))
+
+    if request.enabled is not None:
+        redis_client.set("volatility_enabled", "true" if request.enabled else "false")
+
+    if request.refresh_interval is not None:
+        if not 10 <= request.refresh_interval <= 3600:
+            raise HTTPException(status_code=400, detail="refresh_interval must be 10-3600 seconds")
+        redis_client.set("volatility_refresh_interval", str(request.refresh_interval))
+
+    # Clear any manual override when reconfiguring
+    redis_client.delete("volatility_override")
+
+    return get_volatility_config()
+
+
+@app.post("/api/volatility/override")
+def set_volatility_override(request: VolatilityOverrideRequest):
+    """
+    Manually override volatility trading state.
+    When override is active, it takes precedence over calculated volatility.
+    """
+    if request.enabled:
+        redis_client.set("volatility_override", "enabled")
+    else:
+        redis_client.set("volatility_override", "disabled")
+
+    return get_market_volatility()
+
+
+@app.post("/api/volatility/clear-override")
+def clear_volatility_override():
+    """Clear manual volatility override, return to calculated state."""
+    redis_client.delete("volatility_override")
+    return get_market_volatility()
+
+
+@app.get("/api/volatility/check")
+def check_trading_allowed():
+    """
+    Quick check if trading is currently allowed based on volatility.
+    Used by trading engine before processing signals.
+    """
+    volatility = get_market_volatility()
+    return {
+        "allowed": volatility["trading_allowed"],
+        "status": volatility["status"],
+        "symbols_allowed": volatility["symbols_allowed"],
+        "symbols_blocked": volatility["symbols_blocked"],
+        "total_symbols": volatility["total_symbols"]
+    }
+
+
+@app.get("/api/volatility/symbol/{symbol}")
+def get_symbol_volatility_status(symbol: str):
+    """
+    Get volatility status for a specific symbol.
+    Used to determine if a trade on this symbol should be allowed.
+    """
+    result = get_symbol_volatility(symbol.upper())
+    return result
+
+
+@app.get("/api/volatility/symbol/{symbol}/check")
+def check_symbol_trading_allowed(symbol: str):
+    """
+    Quick check if trading is allowed for a specific symbol.
+    """
+    result = get_symbol_volatility(symbol.upper())
+    return {
+        "symbol": symbol.upper(),
+        "allowed": result["trading_allowed"],
+        "status": result["status"],
+        "atr_percent": result["atr_percent"]
     }
 
 
