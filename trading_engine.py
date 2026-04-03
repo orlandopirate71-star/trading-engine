@@ -709,14 +709,40 @@ class TradingEngine:
             except Exception as e:
                 print(f"[ENGINE] Strategy {strategy.name} candle error: {e}")
     
+    def _check_volatility(self, symbol: str) -> bool:
+        """
+        Check if trading is allowed based on volatility.
+        Returns True if trading is allowed, False if blocked.
+        """
+        try:
+            # Import the volatility calculation from api
+            from api import get_symbol_volatility
+
+            result = get_symbol_volatility(symbol)
+            allowed = result.get("trading_allowed", True)
+
+            if not allowed:
+                print(f"[ENGINE] Volatility BLOCKED {symbol}: ATR={result.get('atr_percent', 0):.4f}% "
+                      f"(threshold low={result.get('thresholds', {}).get('low', 0):.4f}%)")
+
+            return allowed
+        except Exception as e:
+            print(f"[ENGINE] Volatility check error for {symbol}: {e}")
+            return True  # Allow trading on error
+
     def _process_signal(self, signal: TradeSignal, strategy=None):
         """Process a trade signal through the pipeline."""
         print(f"[ENGINE] Signal from {signal.strategy_name}: {signal.direction.value} {signal.symbol} @ {signal.entry_price}")
         print(f"[ENGINE] Signal details: SL={signal.stop_loss}, TP={signal.take_profit}, confidence={signal.confidence}")
-        
+
         # Check position limits before processing
         if strategy and not self._check_position_limits(strategy, signal.symbol):
             print(f"[ENGINE] Position limit reached for {signal.strategy_name} - skipping signal")
+            return
+
+        # Check volatility before processing
+        if not self._check_volatility(signal.symbol):
+            print(f"[ENGINE] Volatility too low for {signal.symbol} - skipping signal")
             return
         
         # Save signal to database
